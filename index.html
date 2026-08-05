@@ -168,7 +168,6 @@
       <button id="btnImport">⬆️ Importar backup</button>
       <input type="file" id="importFile" accept="application/json" style="display:none;">
       <button class="primary" id="btnSave">💾 Salvar</button>
-      <button id="btnAutoBackupConfig" style="display:none;" title="Configurar snapshot automático">⏱️ Auto-backup <span id="autoBackupStatus" class="hint" style="margin:0; color:inherit; opacity:.75;"></span></button>
       <button id="btnSyncConfig" style="display:none;" title="Sincronizar entre dispositivos">🔄 Sincronização <span id="syncStatus" class="hint" style="margin:0; color:inherit; opacity:.75;"></span></button>
       <button id="btnAdmin">🔒 Login Administrador</button>
       <button id="btnChangePassword" style="display:none;">🔑 Alterar senha</button>
@@ -242,23 +241,6 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="autoBackupModal">
-  <div class="modal-box" style="max-width:420px;">
-    <button class="modal-close" id="closeAutoBackupModal">&times;</button>
-    <h2 style="color:var(--navy); margin-top:0;">Snapshot automático (auto-backup)</h2>
-    <p class="hint">Como um problema no computador (cache limpo, navegador travando, notebook trocado) pode apagar tudo o que só existe aqui, o app pode baixar sozinho, de tempos em tempos, um arquivo de backup completo — igual ao "Exportar backup" manual, mas automático. Escolha a cada quantos cliques em "Salvar" isso deve acontecer. Deixe "0" para desativar.</p>
-    <div class="field" style="margin-bottom:10px;">
-      <label class="f-label">Gerar snapshot automático a cada quantos salvamentos?</label>
-      <input type="number" id="abN" min="0" step="1" style="width:100px;">
-    </div>
-    <p id="abStatusMsg" class="hint" style="margin:0 0 6px;"></p>
-    <div class="modal-actions">
-      <button class="btn secondary" id="abTestarAgoraBtn" style="margin-right:auto;">🧪 Gerar um snapshot agora</button>
-      <button class="btn secondary" id="cancelAutoBackupBtn">Cancelar</button>
-      <button class="btn" id="saveAutoBackupBtn">Salvar</button>
-    </div>
-  </div>
-</div>
 
 <div class="modal-overlay" id="gtReagendarModal">
   <div class="modal-box" style="max-width:380px;">
@@ -1570,7 +1552,6 @@ function defaultState(){
     header: defaultHeader(),
     adminPasswordSalt: null,
     adminPasswordHash: null,
-    autoBackupN: 10,
     teams, modalidades,
     games: buildAllGames(teams, modalidades),
     individual: {}, desfile: {}, ajustes: {}, inscritos: [],
@@ -1846,7 +1827,6 @@ function ensureDefaults(s){
   delete s.adminPassword;
   if(typeof s.adminPasswordSalt !== 'string') s.adminPasswordSalt = null;
   if(typeof s.adminPasswordHash !== 'string') s.adminPasswordHash = null;
-  if(typeof s.autoBackupN !== 'number') s.autoBackupN = 10;
   if(!s.header) s.header = defaultHeader();
   if(s.header.eyebrow==null) s.header.eyebrow = defaultHeader().eyebrow;
   if(s.header.subtitle==null) s.header.subtitle = defaultHeader().subtitle;
@@ -2106,17 +2086,13 @@ function markDirty(){
   if(autoSaveTimer) clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(()=>{ autoSaveTimer = null; saveState(); }, AUTO_SAVE_DEBOUNCE_MS);
 }
-async function saveState(contarParaAutoBackup){
+async function saveState(){
   if(autoSaveTimer){ clearTimeout(autoSaveTimer); autoSaveTimer = null; } // um salvamento (manual ou automático) já cobre qualquer auto-save pendente
   try{
     syncDetectarMudancasEAgendar();
     await syncEnviarPendentes();
     dirty = false;
     updateSaveStatus(true);
-    // Só conta para o auto-backup quando o próprio "Salvar" pede isso explicitamente —
-    // saveState() também é chamado internamente (ex.: migração de imagens ao abrir o
-    // app), e esses salvamentos técnicos não devem disparar snapshots.
-    if(contarParaAutoBackup) registrarSalvamentoParaAutoBackup();
     return true;
   }catch(e){
     updateSaveStatus(false, true);
@@ -2177,101 +2153,6 @@ function updateSaveStatus(justSaved, error){
   if(justSaved){ el.textContent = 'Salvo ✓ ' + new Date().toLocaleTimeString('pt-BR'); el.className='save-status'; return; }
   el.textContent = dirty ? '● Alterações não salvas' : 'Tudo salvo';
   el.className = 'save-status' + (dirty?' dirty':'');
-}
-
-/* ===================== AUTO-BACKUP (SNAPSHOT LOCAL A CADA N SALVAMENTOS) =====================
-   Mesmo com os dados vivendo na nuvem (ver PERSISTÊNCIA ONLINE, acima), um problema de
-   configuração ou uma exclusão em massa por engano ainda pode afetar todo mundo ao mesmo
-   tempo. Para reduzir esse risco sem depender de o administrador lembrar de clicar em
-   "Exportar backup", o app conta quantas vezes o botão "Salvar" é clicado e, a cada N
-   vezes (configurável; padrão 10), baixa sozinho um arquivo .json com todos os dados —
-   igual ao "Exportar backup" manual, mas automático e com data/hora no nome do arquivo,
-   formando um histórico de instantâneos (snapshots) na pasta de Downloads de quem estiver
-   logado como administrador. N = 0 desativa o recurso.
-   O limite N (a cada quantos salvamentos baixar um snapshot) é uma preferência do
-   evento, então acompanha STATE e sincroniza com os outros dispositivos como qualquer
-   outro campo de "config" (ver SYNC_CONFIG_CHAVES). Já a contagem em si (quantos
-   salvamentos já aconteceram desde o último snapshot) é só um contador técnico local:
-   fica em memória, sem sincronizar — reinicia a cada carregamento da página, o que é
-   inofensivo (o snapshot automático é só uma rede de segurança extra, não a fonte de
-   dados principal). */
-const AUTO_BACKUP_N_DEFAULT = 10;
-let autoBackupCount = 0;
-
-function loadAutoBackupSettings(){
-  autoBackupCount = 0;
-}
-function setAutoBackupN(n){
-  STATE.autoBackupN = Math.max(0, Math.floor(Number(n)||0));
-  markDirty();
-}
-function registrarSalvamentoParaAutoBackup(){
-  if(!STATE.autoBackupN || STATE.autoBackupN<=0) return; // recurso desativado
-  autoBackupCount++;
-  if(autoBackupCount >= STATE.autoBackupN){
-    autoBackupCount = 0;
-    dispararAutoBackupSnapshot();
-  }
-  atualizarAutoBackupStatusUi();
-}
-function timestampParaArquivo(){
-  const d = new Date();
-  const pad = n=> String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
-}
-function dispararAutoBackupSnapshot(){
-  try{
-    baixarArquivoJson(construirBackupJsonString(), `jim2026-autobackup-${timestampParaArquivo()}.json`);
-    mostrarAvisoTemporario(`💾 Snapshot automático salvo em Downloads (a cada ${STATE.autoBackupN} salvamentos).`);
-  }catch(e){
-    mostrarAvisoTemporario('⚠ Não foi possível gerar o snapshot automático desta vez.', 6000);
-  }
-}
-/* Aviso não bloqueante (a auto-exportação acontece sem interromper o que o administrador
-   está fazendo) — some sozinho depois de alguns segundos. */
-function mostrarAvisoTemporario(texto, ms){
-  const old = document.getElementById('avisoTemporario');
-  if(old) old.remove();
-  const banner = document.createElement('div');
-  banner.id = 'avisoTemporario';
-  banner.className = 'banner';
-  banner.style.position = 'fixed';
-  banner.style.top = '10px';
-  banner.style.right = '10px';
-  banner.style.zIndex = '9999';
-  banner.style.maxWidth = '360px';
-  banner.style.boxShadow = '0 4px 16px rgba(0,0,0,0.18)';
-  banner.textContent = texto;
-  document.body.appendChild(banner);
-  setTimeout(()=>{ banner.remove(); }, ms || 5000);
-}
-function atualizarAutoBackupStatusUi(){
-  const el = document.getElementById('autoBackupStatus');
-  if(!el) return;
-  el.textContent = STATE.autoBackupN>0 ? `(${autoBackupCount}/${STATE.autoBackupN})` : '(off)';
-}
-function openAutoBackupModal(){
-  if(!isAdmin) return;
-  document.getElementById('abN').value = STATE.autoBackupN;
-  atualizarAutoBackupModalMsg();
-  document.getElementById('autoBackupModal').classList.add('open');
-}
-function closeAutoBackupModal(){ document.getElementById('autoBackupModal').classList.remove('open'); }
-function atualizarAutoBackupModalMsg(){
-  const msgEl = document.getElementById('abStatusMsg');
-  if(!msgEl) return;
-  msgEl.textContent = STATE.autoBackupN>0
-    ? `Situação atual: ${autoBackupCount} de ${STATE.autoBackupN} salvamentos desde o último snapshot automático.`
-    : 'Situação atual: recurso desativado (nenhum snapshot automático será gerado).';
-}
-function saveAutoBackupModal(){
-  const n = Math.max(0, Math.floor(Number(document.getElementById('abN').value)||0));
-  setAutoBackupN(n);
-  autoBackupCount = 0; // reinicia a contagem sempre que o intervalo é alterado
-  saveState(); // este ajuste específico já valia imediatamente antes (não dependia do botão Salvar)
-  atualizarAutoBackupStatusUi();
-  atualizarAutoBackupModalMsg();
-  closeAutoBackupModal();
 }
 
 /* ===================== SINCRONIZAÇÃO ENTRE DISPOSITIVOS (Supabase) =====================
@@ -2378,7 +2259,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','ajustes','sumula_obs','inscrito_foto','config'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth','autoBackupN'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -2444,7 +2325,6 @@ function syncConstruirLinha(tabela, registroId){
       crachaConfig: STATE.crachaConfig,
       editalHtml: STATE.editalHtml,
       adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash},
-      autoBackupN: STATE.autoBackupN
     };
     return {...base, dados: valores[registroId], deletado:false};
   }
@@ -2503,7 +2383,6 @@ function syncAplicarLinha(linha){
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = dados;
     else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; }
-    else if(registro_id==='autoBackupN') STATE.autoBackupN = dados;
     return;
   }
 }
@@ -3031,8 +2910,6 @@ function renderHeaderBlock(){
   if(clearBtn) clearBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const pwBtn = document.getElementById('btnChangePassword');
   if(pwBtn) pwBtn.style.display = isAdmin ? 'inline-block' : 'none';
-  const abBtn = document.getElementById('btnAutoBackupConfig');
-  if(abBtn) abBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const syncBtn = document.getElementById('btnSyncConfig');
   if(syncBtn) syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 }
@@ -7372,12 +7249,10 @@ function renderViewOnlyBanner(){
   // reais (Equipes, jogos, inscritos, config, senha de admin etc.), toda vez que a
   // página é aberta.
   loadState();
-  loadAutoBackupSettings();
   syncCarregarConfig();
   atualizarSyncStatusUi();
   await syncCiclo(); // primeira sincronização: puxa tudo o que já existe na nuvem
   syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
-  atualizarAutoBackupStatusUi();
   // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
   // em STATE (agora populado pela sincronização acima) e migra automaticamente eventuais
   // imagens antigas que ainda estejam salvas "cruas" (base64) dentro de STATE — backups
@@ -7388,7 +7263,7 @@ function renderViewOnlyBanner(){
   await finalizarSenhaAdminSeNecessario();
   restoreAdminSession();
   document.title = STATE.eventName + ' — Painel de Gestão';
-  document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin) saveState(true); });
+  document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin) saveState(); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
   document.getElementById('btnImport').addEventListener('click', ()=>{ if(isAdmin) document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files[0] && isAdmin) importBackup(e.target.files[0]); e.target.value=''; });
@@ -7417,17 +7292,11 @@ function renderViewOnlyBanner(){
   document.getElementById('cancelChangePasswordBtn').addEventListener('click', closeChangePasswordModal);
   document.getElementById('confirmChangePasswordBtn').addEventListener('click', confirmChangePassword);
   document.getElementById('changePasswordModal').addEventListener('click', (e)=>{ if(e.target.id==='changePasswordModal') closeChangePasswordModal(); });
-  document.getElementById('btnAutoBackupConfig').addEventListener('click', openAutoBackupModal);
   document.getElementById('btnSyncConfig').addEventListener('click', openSyncModal);
   document.getElementById('closeSyncModal').addEventListener('click', closeSyncModal);
   document.getElementById('closeSyncModalBtn').addEventListener('click', closeSyncModal);
   document.getElementById('syncModal').addEventListener('click', (e)=>{ if(e.target.id==='syncModal') closeSyncModal(); });
   document.getElementById('syncAgoraBtnModal').addEventListener('click', syncAgoraBtn);
-  document.getElementById('closeAutoBackupModal').addEventListener('click', closeAutoBackupModal);
-  document.getElementById('cancelAutoBackupBtn').addEventListener('click', closeAutoBackupModal);
-  document.getElementById('saveAutoBackupBtn').addEventListener('click', saveAutoBackupModal);
-  document.getElementById('abTestarAgoraBtn').addEventListener('click', ()=>{ dispararAutoBackupSnapshot(); });
-  document.getElementById('autoBackupModal').addEventListener('click', (e)=>{ if(e.target.id==='autoBackupModal') closeAutoBackupModal(); });
   document.getElementById('closeGtReagendarModal').addEventListener('click', closeGtReagendarModal);
   document.getElementById('cancelGtReagendarBtn').addEventListener('click', closeGtReagendarModal);
   document.getElementById('saveGtReagendarBtn').addEventListener('click', saveGtReagendarModal);
