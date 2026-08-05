@@ -168,7 +168,6 @@
       <button id="btnImport">⬆️ Importar backup</button>
       <input type="file" id="importFile" accept="application/json" style="display:none;">
       <button class="primary" id="btnSave">💾 Salvar</button>
-      <button id="btnSyncConfig" style="display:none;" title="Sincronizar entre dispositivos">🔄 Sincronização <span id="syncStatus" class="hint" style="margin:0; color:inherit; opacity:.75;"></span></button>
       <button id="btnAdmin">🔒 Login Administrador</button>
       <button id="btnChangePassword" style="display:none;">🔑 Alterar senha</button>
       <button id="btnEditHeader" style="display:none;">🖼️ Editar cabeçalho</button>
@@ -260,20 +259,6 @@
     <div class="modal-actions">
       <button class="btn secondary" id="cancelGtReagendarBtn">Cancelar</button>
       <button class="btn" id="saveGtReagendarBtn">Salvar</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="syncModal">
-  <div class="modal-box" style="max-width:440px;">
-    <button class="modal-close" id="closeSyncModal">&times;</button>
-    <h2 style="color:var(--navy); margin-top:0;">Sincronização entre dispositivos</h2>
-    <p class="hint">Sempre ativa — qualquer pessoa que abre o site já vê os dados mais recentes (Equipes, Modalidades, Inscritos, jogos, súmulas, alimentação, crachá, edital...), sem precisar fazer login. Só EDITAR continua exigindo login de administrador, como sempre. Toda edição feita pelo administrador já é enviada sozinha para a nuvem poucos segundos depois — não é preciso clicar em "Salvar" para os dados não se perderem.</p>
-    <p class="hint" style="margin:0 0 10px;">Situação: <span id="syncModalMsg">—</span></p>
-    <p class="hint" style="margin:0 0 10px; font-size:11px;">ID deste dispositivo: <span id="syncDeviceIdLabel" class="mono"></span></p>
-    <p class="hint" style="margin-top:10px;">⚠️ Se dois dispositivos mudarem o <strong>mesmo</strong> item quase ao mesmo tempo, vale a alteração mais recente — não há mesclagem campo a campo. Editar itens diferentes ao mesmo tempo é sempre seguro.</p>
-    <div class="modal-actions">
-      <button class="btn" id="closeSyncModalBtn">Fechar</button>
     </div>
   </div>
 </div>
@@ -2567,29 +2552,7 @@ function syncIniciarTimer(){
 function syncPararTimer(){
   if(syncTimer){ clearInterval(syncTimer); syncTimer = null; }
 }
-function atualizarSyncStatusUi(){
-  const el = document.getElementById('syncStatus');
-  if(!el) return;
-  const mapa = {iniciando:'iniciando…', sincronizando:'sincronizando…', ok:'em dia', erro:'com erro'};
-  let txt = mapa[syncStatus] || syncStatus;
-  if(syncStatus==='ok' && syncLastSuccessAt) txt += ` (${syncLastSuccessAt.toLocaleTimeString('pt-BR')})`;
-  el.textContent = `(${txt})`;
-}
-
-/* ----- Modal de status (admin) ----- */
-function openSyncModal(){
-  if(!isAdmin) return;
-  document.getElementById('syncDeviceIdLabel').textContent = syncDeviceId;
-  atualizarSyncModalMsg();
-  document.getElementById('syncModal').classList.add('open');
-}
-function closeSyncModal(){ document.getElementById('syncModal').classList.remove('open'); }
-function atualizarSyncModalMsg(){
-  const el = document.getElementById('syncModalMsg');
-  if(!el) return;
-  const mapa = {iniciando:'Conectando…', sincronizando:'Sincronizando agora…', ok:'Tudo em dia.', erro:`Erro na última tentativa: ${syncLastErrorMsg}`};
-  el.textContent = mapa[syncStatus] || '';
-}
+function atualizarSyncStatusUi(){ /* sem UI própria — status fica só internamente, para depuração via console (syncStatus, syncLastErrorMsg) */ }
 
 /* ===================== ARMAZENAMENTO DE IMAGENS (cache em memória + Supabase Storage) =====================
    Fotos de inscritos e logos (cabeçalho/crachá) NÃO ficam salvas em base64 dentro de
@@ -2905,8 +2868,6 @@ function renderHeaderBlock(){
   if(clearBtn) clearBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const pwBtn = document.getElementById('btnChangePassword');
   if(pwBtn) pwBtn.style.display = isAdmin ? 'inline-block' : 'none';
-  const syncBtn = document.getElementById('btnSyncConfig');
-  if(syncBtn) syncBtn.style.display = isAdmin ? 'inline-block' : 'none';
 }
 
 /* ===================== HEADER EDIT MODAL ===================== */
@@ -7287,10 +7248,6 @@ function renderViewOnlyBanner(){
   document.getElementById('cancelChangePasswordBtn').addEventListener('click', closeChangePasswordModal);
   document.getElementById('confirmChangePasswordBtn').addEventListener('click', confirmChangePassword);
   document.getElementById('changePasswordModal').addEventListener('click', (e)=>{ if(e.target.id==='changePasswordModal') closeChangePasswordModal(); });
-  document.getElementById('btnSyncConfig').addEventListener('click', openSyncModal);
-  document.getElementById('closeSyncModal').addEventListener('click', closeSyncModal);
-  document.getElementById('closeSyncModalBtn').addEventListener('click', closeSyncModal);
-  document.getElementById('syncModal').addEventListener('click', (e)=>{ if(e.target.id==='syncModal') closeSyncModal(); });
   document.getElementById('closeGtReagendarModal').addEventListener('click', closeGtReagendarModal);
   document.getElementById('cancelGtReagendarBtn').addEventListener('click', closeGtReagendarModal);
   document.getElementById('saveGtReagendarBtn').addEventListener('click', saveGtReagendarModal);
