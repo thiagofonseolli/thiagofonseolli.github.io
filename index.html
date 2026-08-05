@@ -273,7 +273,6 @@
     <p class="hint" style="margin:0 0 10px; font-size:11px;">ID deste dispositivo: <span id="syncDeviceIdLabel" class="mono"></span></p>
     <p class="hint" style="margin-top:10px;">⚠️ Se dois dispositivos mudarem o <strong>mesmo</strong> item quase ao mesmo tempo, vale a alteração mais recente — não há mesclagem campo a campo. Editar itens diferentes ao mesmo tempo é sempre seguro.</p>
     <div class="modal-actions">
-      <button class="btn secondary" id="syncAgoraBtnModal" style="margin-right:auto;">🔄 Sincronizar agora</button>
       <button class="btn" id="closeSyncModalBtn">Fechar</button>
     </div>
   </div>
@@ -2590,10 +2589,6 @@ function atualizarSyncModalMsg(){
   if(!el) return;
   const mapa = {iniciando:'Conectando…', sincronizando:'Sincronizando agora…', ok:'Tudo em dia.', erro:`Erro na última tentativa: ${syncLastErrorMsg}`};
   el.textContent = mapa[syncStatus] || '';
-}
-async function syncAgoraBtn(){
-  await syncCiclo();
-  atualizarSyncModalMsg();
 }
 
 /* ===================== ARMAZENAMENTO DE IMAGENS (cache em memória + Supabase Storage) =====================
@@ -7296,7 +7291,6 @@ function renderViewOnlyBanner(){
   document.getElementById('closeSyncModal').addEventListener('click', closeSyncModal);
   document.getElementById('closeSyncModalBtn').addEventListener('click', closeSyncModal);
   document.getElementById('syncModal').addEventListener('click', (e)=>{ if(e.target.id==='syncModal') closeSyncModal(); });
-  document.getElementById('syncAgoraBtnModal').addEventListener('click', syncAgoraBtn);
   document.getElementById('closeGtReagendarModal').addEventListener('click', closeGtReagendarModal);
   document.getElementById('cancelGtReagendarBtn').addEventListener('click', closeGtReagendarModal);
   document.getElementById('saveGtReagendarBtn').addEventListener('click', saveGtReagendarModal);
