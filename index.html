@@ -195,9 +195,8 @@
 <div class="app">
   <main id="main"><div class="loading">Carregando dados do JIM…</div></main>
   <div class="foot-note">
-    Os dados deste painel são salvos apenas no navegador deste computador (localStorage), usando o botão <strong>💾 Salvar</strong> — nada é enviado a servidores externos.
-    Se você limpar os dados de navegação ou trocar de computador/navegador, os dados salvos aqui se perdem — por isso, use o botão <strong>⬆️/⬇️ Exportar/Importar backup</strong> regularmente para guardar uma cópia de segurança em arquivo.
-    Para garantir que a gravação funcione de forma permanente, baixe este arquivo HTML e abra-o diretamente no seu navegador (fora do preview do Claude).
+    Os dados deste painel são salvos direto na nuvem (não neste navegador) — qualquer computador ou celular que abrir este link já vê e edita os mesmos dados. O botão <strong>💾 Salvar</strong> envia imediatamente qualquer alteração; sem clicar nele, o app também sincroniza sozinho a cada poucos segundos.
+    Mesmo assim, use o botão <strong>⬆️/⬇️ Exportar/Importar backup</strong> regularmente para guardar uma cópia de segurança em arquivo — é a sua rede de proteção contra uma exclusão em massa por engano.
   </div>
   <p class="app-footer-note">Versão 1 - 2026 - Desenvolvido inicialmente pelo Núcleo de Atividades Complementares do Colégio Marista São José de Montes Claros a partir da experiência de outras unidades Maristas. Obrigado a toda a equipe pelo empenho e inspiração. Avante NAC!</p>
 </div>
@@ -1387,7 +1386,6 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 
 <script>
 /* ===================== CONSTANTS ===================== */
-const LS_KEY = 'jim2026-state-v1';
 const ADMIN_SESSION_KEY = 'jim2026-admin-session';
 const DEFAULT_ADMIN_PASSWORD = 'Marist@Jim2026';
 const FP_POINTS = {A:5,B:4,C:3,D:2,E:0};
@@ -1572,6 +1570,7 @@ function defaultState(){
     header: defaultHeader(),
     adminPasswordSalt: null,
     adminPasswordHash: null,
+    autoBackupN: 10,
     teams, modalidades,
     games: buildAllGames(teams, modalidades),
     individual: {}, desfile: {}, ajustes: {}, inscritos: [],
@@ -1847,6 +1846,7 @@ function ensureDefaults(s){
   delete s.adminPassword;
   if(typeof s.adminPasswordSalt !== 'string') s.adminPasswordSalt = null;
   if(typeof s.adminPasswordHash !== 'string') s.adminPasswordHash = null;
+  if(typeof s.autoBackupN !== 'number') s.autoBackupN = 10;
   if(!s.header) s.header = defaultHeader();
   if(s.header.eyebrow==null) s.header.eyebrow = defaultHeader().eyebrow;
   if(s.header.subtitle==null) s.header.subtitle = defaultHeader().subtitle;
@@ -2081,30 +2081,22 @@ let activeTab = 'painel';
 let dirty = false;
 let isAdmin = false;
 
-/* ===================== LOCAL STORAGE PERSISTENCE ===================== */
-let localStorageOK = true;
-function testLocalStorage(){
-  try{ const k='__jim_test__'; localStorage.setItem(k,'1'); localStorage.removeItem(k); return true; }
-  catch(e){ return false; }
-}
+/* ===================== PERSISTÊNCIA ONLINE (Supabase) =====================
+   Nada é salvo no navegador — todo o estado do app vive na nuvem (Supabase), na mesma
+   base já usada para sincronização entre dispositivos (ver seção SINCRONIZAÇÃO ENTRE
+   DISPOSITIVOS, mais abaixo). "Salvar" aqui significa: comparar o estado atual contra o
+   que já foi enviado e empurrar imediatamente qualquer diferença, em vez de esperar o
+   próximo ciclo automático (a cada 20s). Ao abrir o app, STATE começa vazio (ver
+   defaultState) e é populado assim que a primeira sincronização (pull) traz os dados
+   já existentes na nuvem — ver init(). */
 function loadState(){
-  localStorageOK = testLocalStorage();
-  if(localStorageOK){
-    try{
-      const raw = localStorage.getItem(LS_KEY);
-      if(raw){ STATE = ensureDefaults(JSON.parse(raw)); return; }
-    }catch(e){ /* fall through to default */ }
-  }
   STATE = defaultState();
 }
 function markDirty(){ dirty = true; updateSaveStatus(); }
-function saveState(contarParaAutoBackup){
-  if(!localStorageOK){
-    updateSaveStatus(false, true);
-    return false;
-  }
+async function saveState(contarParaAutoBackup){
   try{
-    localStorage.setItem(LS_KEY, JSON.stringify(STATE));
+    syncDetectarMudancasEAgendar();
+    await syncEnviarPendentes();
     dirty = false;
     updateSaveStatus(true);
     // Só conta para o auto-backup quando o próprio "Salvar" pede isso explicitamente —
@@ -2118,14 +2110,16 @@ function saveState(contarParaAutoBackup){
   }
 }
 /* ===================== SENHA DE ADMINISTRADOR (HASH) =====================
-   A senha não fica mais guardada em texto puro dentro de STATE/localStorage — só um hash
-   (SHA-256, com um "sal" aleatório gerado uma vez por instalação) fica salvo. Importante ser
-   honesto sobre o que isso resolve e o que não resolve: isso NÃO é segurança de verdade —
-   como tudo roda no navegador da própria pessoa, dá para tentar quebrar o hash por força
-   bruta, sem limite de tentativas, ou simplesmente ler `isAdmin` e sobrescrevê-lo no
-   console. O que isso resolve é o problema mais básico de hoje: a senha não fica mais
-   literalmente legível abrindo o DevTools, o localStorage ou um arquivo de backup
-   exportado — que é o cenário mais provável (um aluno curioso), não um ataque sério. */
+   A senha não fica guardada em texto puro em lugar nenhum — só um hash (SHA-256, com um
+   "sal" aleatório gerado uma vez por instalação) é enviado à nuvem, como parte da config
+   sincronizada (ver adminAuth em SYNC_CONFIG_CHAVES), para que o mesmo login funcione em
+   qualquer dispositivo. Importante ser honesto sobre o que isso resolve e o que não
+   resolve: isso NÃO é segurança de verdade — como a verificação roda no navegador da
+   própria pessoa, dá para tentar quebrar o hash por força bruta, sem limite de
+   tentativas, ou simplesmente ler `isAdmin` e sobrescrevê-lo no console. O que isso
+   resolve é o problema mais básico de hoje: a senha não fica literalmente legível
+   abrindo o DevTools ou um arquivo de backup exportado — que é o cenário mais provável
+   (um aluno curioso), não um ataque sério. */
 async function sha256Hex(texto){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -2155,64 +2149,54 @@ async function finalizarSenhaAdminSeNecessario(){
   if(STATE._adminPasswordPendenteMigracao){
     await definirSenhaAdmin(STATE._adminPasswordPendenteMigracao);
     delete STATE._adminPasswordPendenteMigracao;
-    if(localStorageOK) saveState();
+    await saveState();
   } else if(!STATE.adminPasswordHash){
     await definirSenhaAdmin(DEFAULT_ADMIN_PASSWORD);
-    if(localStorageOK) saveState();
+    await saveState();
   }
 }
 
 function updateSaveStatus(justSaved, error){
   const el = document.getElementById('saveStatus');
   if(!el) return;
-  if(error){ el.textContent = '⚠ Não foi possível salvar neste ambiente'; el.className='save-status err'; return; }
+  if(error){ el.textContent = '⚠ Não foi possível salvar na nuvem agora (sem internet?)'; el.className='save-status err'; return; }
   if(justSaved){ el.textContent = 'Salvo ✓ ' + new Date().toLocaleTimeString('pt-BR'); el.className='save-status'; return; }
   el.textContent = dirty ? '● Alterações não salvas' : 'Tudo salvo';
   el.className = 'save-status' + (dirty?' dirty':'');
 }
 
 /* ===================== AUTO-BACKUP (SNAPSHOT LOCAL A CADA N SALVAMENTOS) =====================
-   Como todos os dados vivem só no localStorage deste navegador (ver seção acima), um
-   problema no computador (cache limpo, extensão travando, notebook trocado) pode apagar
-   tudo de uma vez. Para reduzir esse risco sem depender de o administrador lembrar de
-   clicar em "Exportar backup", o app conta quantas vezes o botão "Salvar" é clicado e,
-   a cada N vezes (configurável; padrão 10), baixa sozinho um arquivo .json com todos os
-   dados — igual ao "Exportar backup" manual, mas automático e com data/hora no nome do
-   arquivo, formando um histórico de instantâneos (snapshots) na pasta de Downloads.
-   N = 0 desativa o recurso. O contador e o N ficam salvos no localStorage (fora de
-   STATE), pois são uma preferência técnica do navegador, não um dado do evento. */
-const AUTO_BACKUP_N_KEY = 'jim2026-autobackup-n';
-const AUTO_BACKUP_COUNT_KEY = 'jim2026-autobackup-count';
+   Mesmo com os dados vivendo na nuvem (ver PERSISTÊNCIA ONLINE, acima), um problema de
+   configuração ou uma exclusão em massa por engano ainda pode afetar todo mundo ao mesmo
+   tempo. Para reduzir esse risco sem depender de o administrador lembrar de clicar em
+   "Exportar backup", o app conta quantas vezes o botão "Salvar" é clicado e, a cada N
+   vezes (configurável; padrão 10), baixa sozinho um arquivo .json com todos os dados —
+   igual ao "Exportar backup" manual, mas automático e com data/hora no nome do arquivo,
+   formando um histórico de instantâneos (snapshots) na pasta de Downloads de quem estiver
+   logado como administrador. N = 0 desativa o recurso.
+   O limite N (a cada quantos salvamentos baixar um snapshot) é uma preferência do
+   evento, então acompanha STATE e sincroniza com os outros dispositivos como qualquer
+   outro campo de "config" (ver SYNC_CONFIG_CHAVES). Já a contagem em si (quantos
+   salvamentos já aconteceram desde o último snapshot) é só um contador técnico local:
+   fica em memória, sem sincronizar — reinicia a cada carregamento da página, o que é
+   inofensivo (o snapshot automático é só uma rede de segurança extra, não a fonte de
+   dados principal). */
 const AUTO_BACKUP_N_DEFAULT = 10;
-let autoBackupN = AUTO_BACKUP_N_DEFAULT;
 let autoBackupCount = 0;
 
 function loadAutoBackupSettings(){
-  try{
-    const n = Number(localStorage.getItem(AUTO_BACKUP_N_KEY));
-    autoBackupN = Number.isFinite(n) && n>=0 ? n : AUTO_BACKUP_N_DEFAULT;
-  }catch(e){ autoBackupN = AUTO_BACKUP_N_DEFAULT; }
-  try{
-    const c = Number(localStorage.getItem(AUTO_BACKUP_COUNT_KEY));
-    autoBackupCount = Number.isFinite(c) && c>=0 ? c : 0;
-  }catch(e){ autoBackupCount = 0; }
+  autoBackupCount = 0;
 }
 function setAutoBackupN(n){
-  autoBackupN = Math.max(0, Math.floor(Number(n)||0));
-  try{ localStorage.setItem(AUTO_BACKUP_N_KEY, String(autoBackupN)); }catch(e){}
-}
-function persistAutoBackupCount(){
-  try{ localStorage.setItem(AUTO_BACKUP_COUNT_KEY, String(autoBackupCount)); }catch(e){}
+  STATE.autoBackupN = Math.max(0, Math.floor(Number(n)||0));
+  markDirty();
 }
 function registrarSalvamentoParaAutoBackup(){
-  if(!autoBackupN || autoBackupN<=0) return; // recurso desativado
+  if(!STATE.autoBackupN || STATE.autoBackupN<=0) return; // recurso desativado
   autoBackupCount++;
-  if(autoBackupCount >= autoBackupN){
+  if(autoBackupCount >= STATE.autoBackupN){
     autoBackupCount = 0;
-    persistAutoBackupCount();
     dispararAutoBackupSnapshot();
-  } else {
-    persistAutoBackupCount();
   }
   atualizarAutoBackupStatusUi();
 }
@@ -2224,7 +2208,7 @@ function timestampParaArquivo(){
 function dispararAutoBackupSnapshot(){
   try{
     baixarArquivoJson(construirBackupJsonString(), `jim2026-autobackup-${timestampParaArquivo()}.json`);
-    mostrarAvisoTemporario(`💾 Snapshot automático salvo em Downloads (a cada ${autoBackupN} salvamentos).`);
+    mostrarAvisoTemporario(`💾 Snapshot automático salvo em Downloads (a cada ${STATE.autoBackupN} salvamentos).`);
   }catch(e){
     mostrarAvisoTemporario('⚠ Não foi possível gerar o snapshot automático desta vez.', 6000);
   }
@@ -2250,11 +2234,11 @@ function mostrarAvisoTemporario(texto, ms){
 function atualizarAutoBackupStatusUi(){
   const el = document.getElementById('autoBackupStatus');
   if(!el) return;
-  el.textContent = autoBackupN>0 ? `(${autoBackupCount}/${autoBackupN})` : '(off)';
+  el.textContent = STATE.autoBackupN>0 ? `(${autoBackupCount}/${STATE.autoBackupN})` : '(off)';
 }
 function openAutoBackupModal(){
   if(!isAdmin) return;
-  document.getElementById('abN').value = autoBackupN;
+  document.getElementById('abN').value = STATE.autoBackupN;
   atualizarAutoBackupModalMsg();
   document.getElementById('autoBackupModal').classList.add('open');
 }
@@ -2262,48 +2246,47 @@ function closeAutoBackupModal(){ document.getElementById('autoBackupModal').clas
 function atualizarAutoBackupModalMsg(){
   const msgEl = document.getElementById('abStatusMsg');
   if(!msgEl) return;
-  msgEl.textContent = autoBackupN>0
-    ? `Situação atual: ${autoBackupCount} de ${autoBackupN} salvamentos desde o último snapshot automático.`
+  msgEl.textContent = STATE.autoBackupN>0
+    ? `Situação atual: ${autoBackupCount} de ${STATE.autoBackupN} salvamentos desde o último snapshot automático.`
     : 'Situação atual: recurso desativado (nenhum snapshot automático será gerado).';
 }
 function saveAutoBackupModal(){
   const n = Math.max(0, Math.floor(Number(document.getElementById('abN').value)||0));
   setAutoBackupN(n);
   autoBackupCount = 0; // reinicia a contagem sempre que o intervalo é alterado
-  persistAutoBackupCount();
+  saveState(); // este ajuste específico já valia imediatamente antes (não dependia do botão Salvar)
   atualizarAutoBackupStatusUi();
   atualizarAutoBackupModalMsg();
   closeAutoBackupModal();
 }
 
 /* ===================== SINCRONIZAÇÃO ENTRE DISPOSITIVOS (Supabase) =====================
-   Opcional, desligada por padrão — pensada para o dia do evento, quando a secretaria e a
-   quadra usam notebooks diferentes e precisam ver o que uma a outra lançou.
+   Sempre ativa — é a ÚNICA persistência do app (ver PERSISTÊNCIA ONLINE, mais acima).
+   Qualquer computador ou celular que abrir a página vê e edita os mesmos dados.
 
-   O que é sincronizado: jogos (placar, W.O., data/hora/local), check-ins de alimentação e
-   eventos de súmula — não o STATE inteiro. Cada registro vive numa linha própria na tabela
-   `jim_sync` do Supabase (ver supabase_schema.sql), então dois dispositivos podem editar
-   jogos DIFERENTES ao mesmo tempo sem conflito nenhum. Se editarem o MESMO jogo quase ao
-   mesmo tempo, vale a edição mais recente (comparando o horário do servidor) — não há
-   fusão campo a campo dentro de um mesmo registro.
+   O que é sincronizado: TODO o STATE — Equipes, modalidades, inscritos, jogos, súmulas,
+   crachá, edital, config (incl. senha de admin) e alimentação. Cada registro vive numa
+   linha própria na tabela `jim_sync` do Supabase (ver supabase_schema.sql), então dois
+   dispositivos podem editar itens DIFERENTES ao mesmo tempo sem conflito nenhum. Se
+   editarem o MESMO item quase ao mesmo tempo, vale a edição mais recente (comparando o
+   horário do servidor) — não há fusão campo a campo dentro de um mesmo registro.
 
-   Equipes, modalidades, inscritos, crachá, edital etc. continuam só locais (não
-   sincronizados) — são coisas tipicamente definidas ANTES do evento, num só lugar; só o
-   que muda em tempo real durante o dia do evento entra aqui.
-
-   O app funciona 100% normalmente com isso desligado, ou com a internet fora do ar —
-   nenhuma chamada de rede daqui bloqueia a interface, e qualquer falha é silenciosa,
-   tentada de novo no próximo ciclo. */
+   Sem internet, o app continua funcionando na memória (nada trava a interface), mas
+   nada é salvo — qualquer alteração feita fora do ar se perde ao recarregar a página,
+   já que não há mais nenhuma cópia local. Toda falha de rede é silenciosa e tentada de
+   novo no próximo ciclo (a cada 20s), exceto o clique em "Salvar", que mostra o erro. */
 const SUPABASE_URL = 'https://iotvvngpabasjfkegorx.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvdHZ2bmdwYWJhc2pma2Vnb3J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4NDI5MzEsImV4cCI6MjEwMTQxODkzMX0.9JF0iKCwOPMRMUYwb8QJFPkwIt8gFzA13Q-_DixktaA';
 const SYNC_STORAGE_BUCKET = 'jim2026-imagens';
 const SYNC_TABLE = 'jim_sync';
 const SYNC_INTERVAL_MS = 20000;
 const SYNC_TIMEOUT_MS = 10000; // nunca deixa uma requisição travada segurar o ciclo de sync
-const SYNC_LAST_PULL_KEY = 'jim2026-sync-last-pull';
-const SYNC_DEVICE_ID_KEY = 'jim2026-sync-device-id';
 
 let syncDeviceId = '';
+// Sem persistência local: cada carregamento da página começa com syncLastPull=null, o
+// que faz a primeira sincronização puxar TUDO desde o início (ver comentário no início
+// de syncCiclo) — é assim que o app reconstrói o estado inteiro a partir da nuvem toda
+// vez que é aberto, já que nada fica salvo no navegador.
 let syncLastPull = null;
 let syncStatus = 'iniciando'; // 'iniciando' | 'sincronizando' | 'ok' | 'erro'
 let syncLastErrorMsg = '';
@@ -2313,21 +2296,14 @@ let syncCicloEmAndamento = false;
 let syncPrimeiroCicloFeito = false;
 
 function syncGerarDeviceId(){
-  let id = null;
-  try{ id = localStorage.getItem(SYNC_DEVICE_ID_KEY); }catch(e){}
-  if(!id){
-    id = 'dev_' + Math.random().toString(36).slice(2, 10);
-    try{ localStorage.setItem(SYNC_DEVICE_ID_KEY, id); }catch(e){}
-  }
-  return id;
+  return 'dev_' + Math.random().toString(36).slice(2, 10);
 }
 function syncCarregarConfig(){
-  try{ syncLastPull = localStorage.getItem(SYNC_LAST_PULL_KEY) || null; }catch(e){ syncLastPull = null; }
+  syncLastPull = null;
   syncDeviceId = syncGerarDeviceId();
 }
 function syncSalvarLastPull(iso){
   syncLastPull = iso;
-  try{ localStorage.setItem(SYNC_LAST_PULL_KEY, iso); }catch(e){}
 }
 
 async function syncRequisicao(metodo, caminho, corpo, cabecalhosExtra, corpoCru){
@@ -2388,7 +2364,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','ajustes','sumula_obs','inscrito_foto','config'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth','autoBackupN'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -2452,7 +2428,9 @@ function syncConstruirLinha(tabela, registroId){
       regras: STATE.regras,
       tabOrder: STATE.tabOrder,
       crachaConfig: STATE.crachaConfig,
-      editalHtml: STATE.editalHtml
+      editalHtml: STATE.editalHtml,
+      adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash},
+      autoBackupN: STATE.autoBackupN
     };
     return {...base, dados: valores[registroId], deletado:false};
   }
@@ -2510,6 +2488,8 @@ function syncAplicarLinha(linha){
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = dados;
+    else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; }
+    else if(registro_id==='autoBackupN') STATE.autoBackupN = dados;
     return;
   }
 }
@@ -2615,10 +2595,8 @@ async function syncPuxarNovidades(){
 }
 
 /* ===================== IMAGENS (fotos e logos) via Supabase Storage =====================
-   Guardadas como arquivo de verdade (não texto), pra qualquer visitante ver sem precisar
-   ter sincronizado antes. O app local mantém sua cópia em IndexedDB (ver ARMAZENAMENTO
-   DE IMAGENS) pra funcionar offline — isso aqui só espelha essa cópia pro Storage quando
-   ela muda (chamado de dentro de imgSet), e busca de lá quando falta localmente. */
+   Guardadas como arquivo de verdade (não texto) no Supabase Storage — é a ÚNICA cópia
+   que existe; qualquer visitante busca de lá (ver ARMAZENAMENTO DE IMAGENS, acima). */
 function syncStorageUrl(ref){ return `${SUPABASE_URL}/storage/v1/object/public/${SYNC_STORAGE_BUCKET}/${encodeURIComponent(ref)}.png`; }
 async function syncEnviarImagem(ref, dataUrl){
   if(!dataUrl) return;
@@ -2626,7 +2604,7 @@ async function syncEnviarImagem(ref, dataUrl){
     const blob = await (await fetch(dataUrl)).blob();
     await syncRequisicao('POST', `/storage/v1/object/${SYNC_STORAGE_BUCKET}/${encodeURIComponent(ref)}.png`, blob,
       { 'Content-Type':'image/png', 'x-upsert':'true' }, true);
-  }catch(e){ /* melhor esforço — a imagem continua disponível localmente (IndexedDB) mesmo se isso falhar */ }
+  }catch(e){ /* melhor esforço — o cache em memória (IMG_CACHE) mantém a imagem enquanto a aba estiver aberta, mesmo se isso falhar */ }
 }
 async function syncBaixarImagemSeNecessario(ref){
   if(!ref || imgGet(ref)) return;
@@ -2644,7 +2622,6 @@ async function syncBaixarImagemSeNecessario(ref){
       reader.readAsDataURL(blob);
     });
     IMG_CACHE.set(ref, dataUrl);
-    openImgDb().then(db=>{ try{ db.transaction(IMG_STORE,'readwrite').objectStore(IMG_STORE).put(dataUrl, ref); }catch(e){} }).catch(()=>{});
   }catch(e){ /* melhor esforço */ }
 }
 
@@ -2726,38 +2703,16 @@ async function syncAgoraBtn(){
   atualizarSyncModalMsg();
 }
 
-/* ===================== ARMAZENAMENTO DE IMAGENS (IndexedDB) =====================
-   Fotos de inscritos e logos (cabeçalho/crachá) NÃO ficam mais salvas em base64 dentro
-   de STATE/localStorage — o localStorage tem um limite de poucos MB por site, e cada
-   foto em base64 ocupa dezenas ou centenas de KB. Com centenas de inscritos, isso
-   rapidamente estoura o limite e pode corromper o salvamento de TODOS os dados do app
-   (jogos, súmulas, inscrições), não só das fotos.
-
-   Em vez disso: as imagens (o texto "data:image/..." em si) ficam guardadas no
-   IndexedDB, que não tem esse limite apertado. O que fica salvo dentro de STATE é
-   apenas uma referência curta (ex.: "foto_17"), igual a um ID de arquivo. Um cache em
-   memória (IMG_CACHE) mantém as imagens já carregadas, para que o restante do código
-   continue lendo/gravando fotos de forma simples, sem precisar esperar promises em
-   todo lugar. */
-const IMG_DB_NAME = 'jim2026_imagens';
-const IMG_STORE = 'imagens';
+/* ===================== ARMAZENAMENTO DE IMAGENS (cache em memória + Supabase Storage) =====================
+   Fotos de inscritos e logos (cabeçalho/crachá) NÃO ficam salvas em base64 dentro de
+   STATE — em vez disso, o texto "data:image/..." em si é enviado para o Supabase
+   Storage (bucket jim2026-imagens, ver syncEnviarImagem) e o que fica salvo dentro de
+   STATE é apenas uma referência curta (ex.: "foto_17"), igual a um ID de arquivo. Um
+   cache em memória (IMG_CACHE) mantém as imagens já baixadas nesta sessão, para que o
+   restante do código continue lendo/gravando fotos de forma simples, sem precisar
+   esperar promises em todo lugar — a busca de verdade (ver syncBaixarImagemSeNecessario)
+   acontece uma vez por referência, na primeira vez que ela é usada. */
 const IMG_CACHE = new Map(); // referência (string) -> data URL da imagem
-let imgDbOK = true;
-let imgDbPromise = null;
-
-function openImgDb(){
-  if(imgDbPromise) return imgDbPromise;
-  imgDbPromise = new Promise((resolve, reject)=>{
-    if(!window.indexedDB){ reject(new Error('IndexedDB indisponível neste navegador.')); return; }
-    try{
-      const req = indexedDB.open(IMG_DB_NAME, 1);
-      req.onupgradeneeded = ()=>{ if(!req.result.objectStoreNames.contains(IMG_STORE)) req.result.createObjectStore(IMG_STORE); };
-      req.onsuccess = ()=> resolve(req.result);
-      req.onerror = ()=> reject(req.error);
-    }catch(e){ reject(e); }
-  });
-  return imgDbPromise;
-}
 
 /* Retorna a data URL correspondente a uma referência (ou '' se não houver imagem).
    Sempre lê do cache em memória — por isso é síncrona e pode ser usada normalmente
@@ -2768,23 +2723,17 @@ function imgGet(ref){
 }
 
 /* Grava (ou remove, se dataUrl for vazio/null) a imagem associada à referência `ref`.
-   Atualiza o cache em memória imediatamente (uso síncrono) e grava no IndexedDB em
+   Atualiza o cache em memória imediatamente (uso síncrono) e envia para o Supabase Storage em
    segundo plano. Retorna a própria referência (para ser guardada em STATE) ou '' caso
    a imagem tenha sido removida — mantendo o mesmo padrão que os campos de foto/logo já
    usavam antes (string vazia = sem imagem). */
 function imgSet(ref, dataUrl){
   if(!dataUrl){
     IMG_CACHE.delete(ref);
-    openImgDb().then(db=>{
-      try{ db.transaction(IMG_STORE,'readwrite').objectStore(IMG_STORE).delete(ref); }catch(e){}
-    }).catch(()=>{ imgDbOK = false; });
     return '';
   }
   IMG_CACHE.set(ref, dataUrl);
-  openImgDb().then(db=>{
-    try{ db.transaction(IMG_STORE,'readwrite').objectStore(IMG_STORE).put(dataUrl, ref); }catch(e){}
-  }).catch(()=>{ imgDbOK = false; });
-  syncEnviarImagem(ref, dataUrl); // espelha para o Supabase Storage, para outros dispositivos/visitantes verem
+  syncEnviarImagem(ref, dataUrl); // envia para o Supabase Storage — é a única cópia que existe
   return ref;
 }
 
@@ -2800,33 +2749,20 @@ function collectImageRefs(){
   return refs;
 }
 
-/* Carrega do IndexedDB, para o cache em memória, todas as imagens referenciadas em
-   STATE. É chamada uma única vez, na inicialização do app (antes do primeiro
-   renderAll), para que as fotos apareçam imediatamente ao abrir o app. */
+/* Busca no Supabase Storage, para o cache em memória, todas as imagens referenciadas em
+   STATE que ainda não foram baixadas nesta sessão. É chamada uma única vez, na
+   inicialização do app (depois da primeira sincronização, que já populou STATE com os
+   dados vindos da nuvem — ver init()), para que as fotos apareçam já na primeira tela. */
 async function hydrateImageCache(){
   const refs = collectImageRefs();
-  if(refs.length===0) return;
-  try{
-    const db = await openImgDb();
-    await new Promise((resolve)=>{
-      const tx = db.transaction(IMG_STORE, 'readonly');
-      const store = tx.objectStore(IMG_STORE);
-      let pending = refs.length;
-      refs.forEach(ref=>{
-        let req;
-        try{ req = store.get(ref); }catch(e){ if(--pending===0) resolve(); return; }
-        req.onsuccess = ()=>{ if(req.result) IMG_CACHE.set(ref, req.result); if(--pending===0) resolve(); };
-        req.onerror = ()=>{ if(--pending===0) resolve(); };
-      });
-    });
-  }catch(e){ imgDbOK = false; }
+  await Promise.all(refs.map(ref=> syncBaixarImagemSeNecessario(ref)));
 }
 
-/* Migração automática: versões salvas antes desta mudança (ou backups JSON antigos
-   importados) guardam a imagem inteira ("data:image/...") direto nos campos de STATE.
-   Esta função detecta esses casos, move a imagem para o IndexedDB e substitui o campo
-   por uma referência curta — assim o próximo salvamento (localStorage) já fica leve. */
-function migrateInlineImagesToIndexedDB(){
+/* Migração automática: backups JSON antigos (exportados antes desta mudança, ou de
+   versões anteriores do app) guardam a imagem inteira ("data:image/...") direto nos
+   campos de STATE. Esta função detecta esses casos, envia a imagem para o Supabase
+   Storage e substitui o campo por uma referência curta. */
+function migrateInlineImagesToCloud(){
   let changed = false;
   const isInline = (v)=> typeof v==='string' && v.indexOf('data:')===0;
   if(STATE.header && isInline(STATE.header.logoDataUrl)){ STATE.header.logoDataUrl = imgSet('header_logo', STATE.header.logoDataUrl); changed = true; }
@@ -6945,7 +6881,7 @@ function gerarEditalPdf(){
 }
 
 /* Gera uma página HTML autônoma e somente-leitura com a classificação e os jogos atuais —
-   sem login, sem localStorage, sem dependência do restante do app. Pensada para ser salva
+   sem login, sem dependências do restante do app. Pensada para ser salva
    numa pasta compartilhada (Google Drive/OneDrive) e reaberta por pais/alunos pelo celular
    a partir de um link de visualização. Cada clique gera uma nova "foto" dos dados; para
    atualizar o que o público vê, é preciso publicar de novo e substituir o arquivo salvo. */
@@ -7349,7 +7285,7 @@ function closePainelModal(){ document.getElementById('painelModal').classList.re
 
 /* ===================== EXPORT / IMPORT ===================== */
 function construirBackupJsonString(){
-  // Fotos e logos não ficam mais dentro de STATE (foram para o IndexedDB, ver seção
+  // Fotos e logos não ficam dentro de STATE (foram para o Supabase Storage, ver seção
   // "ARMAZENAMENTO DE IMAGENS"), então, para o arquivo .json exportado continuar
   // completo e portátil (com as fotos, ao abrir em outro computador), montamos aqui
   // uma cópia de STATE com as imagens reais coladas de volta nos campos.
@@ -7374,14 +7310,15 @@ function importBackup(file){
       const parsed = JSON.parse(e.target.result);
       STATE = ensureDefaults(parsed);
       // O backup importado traz as fotos/logos como data URL inteiras (ver exportBackup);
-      // migra tudo para o IndexedDB antes de renderizar, para não estourar o localStorage.
-      migrateInlineImagesToIndexedDB();
+      // envia tudo para o Supabase Storage antes de renderizar, substituindo os campos
+      // por referências curtas.
+      migrateInlineImagesToCloud();
       // Backups antigos podem trazer a senha em texto puro (ver migração em ensureDefaults) —
-      // hasheia antes de continuar, para nunca salvar esse texto de volta no localStorage.
+      // hasheia antes de continuar, para nunca reenviar esse texto puro para a nuvem.
       await finalizarSenhaAdminSeNecessario();
       markDirty();
       renderAll();
-      alert('Backup importado. Clique em "Salvar" para gravar no navegador.');
+      alert('Backup importado. Clique em "Salvar" para enviar para a nuvem.');
     }catch(err){ alert('Arquivo inválido.'); }
   };
   reader.readAsText(file);
@@ -7416,28 +7353,27 @@ function renderViewOnlyBanner(){
 }
 
 (async function init(){
+  // Sem localStorage: STATE começa vazio (defaultState) e só fica completo depois da
+  // primeira sincronização com o Supabase, logo abaixo — é de lá que vêm todos os dados
+  // reais (Equipes, jogos, inscritos, config, senha de admin etc.), toda vez que a
+  // página é aberta.
   loadState();
   loadAutoBackupSettings();
-  atualizarAutoBackupStatusUi();
   syncCarregarConfig();
   atualizarSyncStatusUi();
-  syncIniciarTimer(); // sempre ativa, para qualquer pessoa com a página aberta, admin ou não
-  // Carrega do IndexedDB, para o cache em memória, as fotos/logos já referenciadas em
-  // STATE e migra automaticamente eventuais imagens antigas que ainda estejam salvas
-  // "cruas" (base64) dentro de STATE — versões salvas antes desta mudança, ou backups
+  await syncCiclo(); // primeira sincronização: puxa tudo o que já existe na nuvem
+  syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
+  atualizarAutoBackupStatusUi();
+  // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
+  // em STATE (agora populado pela sincronização acima) e migra automaticamente eventuais
+  // imagens antigas que ainda estejam salvas "cruas" (base64) dentro de STATE — backups
   // importados de fora. Feito antes do primeiro renderAll(), para as imagens já
   // aparecerem corretamente na primeira tela.
   await hydrateImageCache();
-  if(migrateInlineImagesToIndexedDB() && localStorageOK) saveState();
+  if(migrateInlineImagesToCloud()) await saveState();
   await finalizarSenhaAdminSeNecessario();
   restoreAdminSession();
   document.title = STATE.eventName + ' — Painel de Gestão';
-  if(!localStorageOK){
-    const banner = document.createElement('div');
-    banner.className='banner';
-    banner.textContent = '⚠ Este ambiente de pré-visualização não permite gravação local (localStorage bloqueado). Baixe o arquivo HTML e abra-o diretamente no navegador do seu computador para que o botão Salvar funcione normalmente.';
-    document.getElementById('main').before(banner);
-  }
   document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin) saveState(true); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
   document.getElementById('btnImport').addEventListener('click', ()=>{ if(isAdmin) document.getElementById('importFile').click(); });
