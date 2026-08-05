@@ -286,7 +286,7 @@
   <div class="modal-box" style="max-width:440px;">
     <button class="modal-close" id="closeSyncModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">Sincronização entre dispositivos</h2>
-    <p class="hint">Sempre ativa — qualquer pessoa que abre o site já vê os dados mais recentes (Equipes, Modalidades, Inscritos, jogos, súmulas, alimentação, crachá, edital...), sem precisar fazer login. Só EDITAR continua exigindo login de administrador, como sempre.</p>
+    <p class="hint">Sempre ativa — qualquer pessoa que abre o site já vê os dados mais recentes (Equipes, Modalidades, Inscritos, jogos, súmulas, alimentação, crachá, edital...), sem precisar fazer login. Só EDITAR continua exigindo login de administrador, como sempre. Toda edição feita pelo administrador já é enviada sozinha para a nuvem poucos segundos depois — não é preciso clicar em "Salvar" para os dados não se perderem.</p>
     <p class="hint" style="margin:0 0 10px;">Situação: <span id="syncModalMsg">—</span></p>
     <p class="hint" style="margin:0 0 10px; font-size:11px;">ID deste dispositivo: <span id="syncDeviceIdLabel" class="mono"></span></p>
     <p class="hint" style="margin-top:10px;">⚠️ Se dois dispositivos mudarem o <strong>mesmo</strong> item quase ao mesmo tempo, vale a alteração mais recente — não há mesclagem campo a campo. Editar itens diferentes ao mesmo tempo é sempre seguro.</p>
@@ -2085,15 +2085,29 @@ let isAdmin = false;
    Nada é salvo no navegador — todo o estado do app vive na nuvem (Supabase), na mesma
    base já usada para sincronização entre dispositivos (ver seção SINCRONIZAÇÃO ENTRE
    DISPOSITIVOS, mais abaixo). "Salvar" aqui significa: comparar o estado atual contra o
-   que já foi enviado e empurrar imediatamente qualquer diferença, em vez de esperar o
-   próximo ciclo automático (a cada 20s). Ao abrir o app, STATE começa vazio (ver
-   defaultState) e é populado assim que a primeira sincronização (pull) traz os dados
-   já existentes na nuvem — ver init(). */
+   que já foi enviado e empurrar imediatamente qualquer diferença. Ao abrir o app, STATE
+   começa vazio (ver defaultState) e é populado assim que a primeira sincronização (pull)
+   traz os dados já existentes na nuvem — ver init().
+
+   Toda edição é enviada à nuvem automaticamente, não só quando alguém lembra de clicar
+   em "💾 Salvar": markDirty() (chamada em toda edição do app) agenda um envio automático
+   pouco tempo depois da última mudança — ver AUTO_SAVE_DEBOUNCE_MS, logo abaixo. Isso
+   evita depender só do ciclo periódico de sincronização (a cada 20s) ou de alguém
+   lembrar de clicar em Salvar; o botão "Salvar" continua existindo para quem quiser a
+   confirmação imediata ("Salvo ✓ HH:MM:SS") sem esperar o pequeno atraso. */
 function loadState(){
   STATE = defaultState();
 }
-function markDirty(){ dirty = true; updateSaveStatus(); }
+const AUTO_SAVE_DEBOUNCE_MS = 1500; // tempo de "silêncio" após a última edição antes de enviar sozinho
+let autoSaveTimer = null;
+function markDirty(){
+  dirty = true;
+  updateSaveStatus();
+  if(autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(()=>{ autoSaveTimer = null; saveState(); }, AUTO_SAVE_DEBOUNCE_MS);
+}
 async function saveState(contarParaAutoBackup){
+  if(autoSaveTimer){ clearTimeout(autoSaveTimer); autoSaveTimer = null; } // um salvamento (manual ou automático) já cobre qualquer auto-save pendente
   try{
     syncDetectarMudancasEAgendar();
     await syncEnviarPendentes();
