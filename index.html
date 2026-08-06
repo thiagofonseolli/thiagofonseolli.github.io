@@ -1394,12 +1394,21 @@ function roundRobinPairs(ids){
   return pairs;
 }
 
+/* Cada equipe agora carrega um campo `genero` ('M', 'F' ou 'X' para misto) — ver o
+   seletor na aba Inscrições → Equipes. Times 'M'/'F' só entram no bracket
+   correspondente; times 'X' (misto) entram nos dois, preservando o comportamento
+   antigo (quando toda equipe jogava automaticamente nas duas categorias) para quem não
+   migrar explicitamente para Masculino/Feminino. */
+function teamsParaGenero(teams, genero){
+  return teams.filter(t=> (t.genero||'X')==='X' || t.genero===genero);
+}
 function buildAllGames(teams, modalidades){
   let games=[]; let id=1;
-  if(teams.length<2) return games;
-  const ids = teams.map(t=>t.id);
   modalidades.forEach(mod=>{
     ['F','M'].forEach(gen=>{
+      const elegiveis = teamsParaGenero(teams, gen);
+      if(elegiveis.length<2) return;
+      const ids = elegiveis.map(t=>t.id);
       roundRobinPairs(ids).forEach(([a,b])=>{
         games.push({id:id++, modalidade:mod, genero:gen,
           teamA:a, teamB:b, scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null});
@@ -1416,9 +1425,11 @@ function nextGameId(){
 function regenerateMissingGames(){
   let added=0;
   if(STATE.teams.length<2) return added;
-  const ids = STATE.teams.map(t=>t.id);
   STATE.modalidades.forEach(mod=>{
     ['F','M'].forEach(gen=>{
+      const elegiveis = teamsParaGenero(STATE.teams, gen);
+      if(elegiveis.length<2) return;
+      const ids = elegiveis.map(t=>t.id);
       roundRobinPairs(ids).forEach(([a,b])=>{
         const exists = STATE.games.some(g=> g.modalidade===mod && g.genero===gen &&
           ((g.teamA===a&&g.teamB===b)||(g.teamA===b&&g.teamB===a)));
@@ -1820,6 +1831,7 @@ function ensureDefaults(s){
   if(s.header.logoDataUrl===undefined) s.header.logoDataUrl = null;
   if(s.header.bgDataUrl===undefined) s.header.bgDataUrl = null;
   if(!Array.isArray(s.criteriosPersonalizados)) s.criteriosPersonalizados = [];
+  if(Array.isArray(s.teams)) s.teams.forEach(t=>{ if(t.genero!=='M' && t.genero!=='F') t.genero = 'X'; });
   s.criteriosPersonalizados.forEach(c=>{
     if(typeof c.id !== 'number') c.id = Date.now() + Math.floor(Math.random()*1000);
     if(typeof c.nome !== 'string' || !c.nome) c.nome = 'Critério';
@@ -3880,9 +3892,14 @@ function renderEquipesContentHtml(){
   const aglutinadores = STATE.aglutinadores;
   return `<div class="card">
     <h2>Equipes</h2>
-    <p class="hint">${isAdmin ? 'Adicione ou remova Equipes. Ao remover, todos os jogos, colocações, pontos de desfile e ajustes dessa equipe também são apagados. Todas as Equipes jogam entre si.' : 'Faça login como administrador para adicionar ou remover Equipes.'}</p>
+    <p class="hint">${isAdmin ? 'Adicione ou remova Equipes. Ao remover, todos os jogos, colocações, pontos de desfile e ajustes dessa equipe também são apagados. Equipes do mesmo gênero jogam entre si; equipes "Misto" entram nos jogos masculinos e femininos.' : 'Faça login como administrador para adicionar ou remover Equipes.'}</p>
     ${isAdmin ? `<div class="row">
       <div class="field"><label class="f-label">Nome da equipe</label><input type="text" id="ntLabel" placeholder="Ex.: 6ºD" style="width:180px;"></div>
+      <div class="field"><label class="f-label">Gênero</label><select id="ntGenero" style="width:130px;">
+        <option value="X">Misto</option>
+        <option value="M">Masculino</option>
+        <option value="F">Feminino</option>
+      </select></div>
       <div class="field"><label class="f-label">Adicionar aglutinador</label><select id="ntAglutinador">
         <option value="">— Nenhum —</option>
         ${aglutinadores.map(g=>`<option value="${g.id}">${escPdf(g.nome)}</option>`).join('')}
@@ -3890,7 +3907,7 @@ function renderEquipesContentHtml(){
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ntAdd">+ Adicionar equipe</button></div>
     </div>` : ''}
   </div>
-  <div class="card"><table><thead><tr><th>equipe</th><th>Aglutinador</th><th></th></tr></thead><tbody id="teamsBody"></tbody></table></div>
+  <div class="card"><table><thead><tr><th>equipe</th><th>Gênero</th><th>Aglutinador</th><th></th></tr></thead><tbody id="teamsBody"></tbody></table></div>
 
   <div class="card">
     <h2>Aglutinadores</h2>
@@ -3935,12 +3952,13 @@ function bindEquipesEvents(){
     document.getElementById('ntAdd').addEventListener('click', ()=>{
       const label = document.getElementById('ntLabel').value.trim();
       if(!label){ alert('Informe o nome da equipe.'); return; }
+      const genero = document.getElementById('ntGenero').value;
       const aglSel = document.getElementById('ntAglutinador').value;
       const aglutinadorId = aglSel ? Number(aglSel) : null;
       let id = label.replace(/\s+/g,'');
       let suffix=1; const baseId=id;
       while(STATE.teams.some(t=>t.id===id)){ id = baseId+'_'+(++suffix); }
-      STATE.teams.push({id, label, aglutinadorId});
+      STATE.teams.push({id, label, genero, aglutinadorId});
       document.getElementById('ntLabel').value='';
       markDirty(); renderInscricoes(); renderScoreboard();
     });
@@ -4016,12 +4034,26 @@ function renderAglutinadoresList(){
 }
 function renderTeamsBody(){
   const body = document.getElementById('teamsBody');
+  const generoLabel = {M:'Masculino', F:'Feminino', X:'Misto'};
   body.innerHTML = STATE.teams.map(t=>`<tr data-id="${t.id}"><td>${teamChip(t.id, null)}</td>
+    <td>${isAdmin ? `<select class="teamGenero" style="font-size:12.5px;">
+        <option value="X" ${(t.genero||'X')==='X'?'selected':''}>Misto</option>
+        <option value="M" ${t.genero==='M'?'selected':''}>Masculino</option>
+        <option value="F" ${t.genero==='F'?'selected':''}>Feminino</option>
+      </select>` : generoLabel[t.genero||'X']}</td>
     <td>${isAdmin ? `<select class="teamAglutinador" style="font-size:12.5px;">
         <option value="">— Nenhum —</option>
         ${STATE.aglutinadores.map(g=>`<option value="${g.id}" ${t.aglutinadorId===g.id?'selected':''}>${escPdf(g.nome)}</option>`).join('')}
       </select>` : (STATE.aglutinadores.find(g=>g.id===t.aglutinadorId)?.nome || '<span class="hint">—</span>')}</td>
     <td>${isAdmin?'<button class="btn danger small removeTeam">✕ Remover</button>':''}</td></tr>`).join('');
+  body.querySelectorAll('.teamGenero').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const id = sel.closest('tr').dataset.id;
+      const team = STATE.teams.find(t=>t.id===id);
+      team.genero = sel.value;
+      markDirty();
+    });
+  });
   body.querySelectorAll('.teamAglutinador').forEach(sel=>{
     sel.addEventListener('change', ()=>{
       const id = sel.closest('tr').dataset.id;
