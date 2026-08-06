@@ -2049,7 +2049,7 @@ function teamTextColorFor(genero){
 function teamChip(teamId, genero, extraClass){
   const bg = teamColor(teamId, genero);
   const txt = teamTextColorFor(genero);
-  return `<span class="team-chip${extraClass?' '+extraClass:''}" style="background:${bg};color:${txt};">${teamLabel(teamId)}</span>`;
+  return `<span class="team-chip${extraClass?' '+extraClass:''}" style="background:${bg};color:${txt};">${escPdf(teamLabel(teamId))}</span>`;
 }
 function teamOptionStyle(teamId, genero){
   return `background:${teamColor(teamId, genero)};color:${teamTextColorFor(genero)};`;
@@ -3123,8 +3123,8 @@ function renderJogos(){
     <div class="row">
       <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
-      <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${t.label}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${t.label}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
     </div>
   </div>` : ''}
@@ -3184,8 +3184,8 @@ function renderGamesList(){
       <div class="game-extra">
         <div class="field"><label class="f-label">W.O.</label><select class="woSelect" ${adminDisabled()}>
           <option value="">Nenhum</option>
-          <option value="A" style="${teamOptionStyle(g.teamA, g.genero)}" ${g.wo==='A'?'selected':''}>${teamLabel(g.teamA)} faltou</option>
-          <option value="B" style="${teamOptionStyle(g.teamB, g.genero)}" ${g.wo==='B'?'selected':''}>${teamLabel(g.teamB)} faltou</option>
+          <option value="A" style="${teamOptionStyle(g.teamA, g.genero)}" ${g.wo==='A'?'selected':''}>${escPdf(teamLabel(g.teamA))} faltou</option>
+          <option value="B" style="${teamOptionStyle(g.teamB, g.genero)}" ${g.wo==='B'?'selected':''}>${escPdf(teamLabel(g.teamB))} faltou</option>
         </select></div>
         <div class="field"><label class="f-label">Jogo Limpo — ${teamChip(g.teamA, g.genero)}</label><select class="fpA" ${adminDisabled()}>
           <option value="">—</option>${['A','B','C','D','E'].map(l=>`<option value="${l}" ${g.fpA===l?'selected':''}>${l}</option>`).join('')}
@@ -4669,7 +4669,7 @@ function renderInscritosContentHtml(){
     <p class="hint">Cadastre um inscrito por vez: informe o gênero e marque em quais modalidades está inscrito. O gênero é usado para casar automaticamente o inscrito com os jogos e súmulas femininos ou masculinos de cada modalidade. Cada inscrito recebe um código único (4 letras minúsculas + 4 números, em qualquer combinação) ao ser cadastrado.</p>
     <div class="row" style="align-items:flex-start;">
       <div class="field"><label class="f-label">Nome do inscrito</label><input type="text" id="alNome" placeholder="Nome completo" style="width:220px;" ${adminDisabled()}></div>
-      <div class="field"><label class="f-label">equipe</label><select id="alequipe" ${adminDisabled()}>${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${t.label}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">equipe</label><select id="alequipe" ${adminDisabled()}>${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="alGenero" ${adminDisabled()}><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
       <div class="field">
         <label class="f-label">Foto</label>
@@ -4682,7 +4682,7 @@ function renderInscritosContentHtml(){
       </div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
-      <div class="row" id="alModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="alModCheck" value="${o.key}" ${adminDisabled()}> ${o.label}</label>`).join('')}</div>
+      <div class="row" id="alModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="alModCheck" value="${o.key}" ${adminDisabled()}> ${escPdf(o.label)}</label>`).join('')}</div>
     </div>
     <div class="row" style="margin-top:14px; align-items:flex-start;">
       <div class="field">
@@ -4715,11 +4715,11 @@ function renderInscritosContentHtml(){
     <div class="row" style="margin-bottom:10px;">
       <div class="field"><label class="f-label">Filtrar por equipe</label><select id="alFiltroequipe">
         <option value="todas">Todas as Equipes</option>
-        ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${inscritoFiltroequipe===t.id?'selected':''}>${t.label}</option>`).join('')}
+        ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${inscritoFiltroequipe===t.id?'selected':''}>${escPdf(t.label)}</option>`).join('')}
       </select></div>
       <div class="field"><label class="f-label">Filtrar por modalidade</label><select id="alFiltroMod">
         <option value="todas">Todas as modalidades</option>
-        ${modOptions.map(o=>`<option value="${o.key}" ${inscritoFiltroModalidade===o.key?'selected':''}>${o.label}</option>`).join('')}
+        ${modOptions.map(o=>`<option value="${o.key}" ${inscritoFiltroModalidade===o.key?'selected':''}>${escPdf(o.label)}</option>`).join('')}
       </select></div>
       <div class="field"><label class="f-label">Filtrar por gênero</label><select id="alFiltroGenero">
         <option value="todos" ${inscritoFiltroGenero==='todos'?'selected':''}>Todos</option>
@@ -4827,7 +4827,7 @@ function renderInscritosBody(){
     const fotoUrl = imgGet(a.foto);
     return `<tr data-id="${a.id}">
     <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
-    <td>${a.nome}</td><td>${teamChip(a.teamId, a.genero)}</td>
+    <td>${escPdf(a.nome)}</td><td>${teamChip(a.teamId, a.genero)}</td>
     <td>${a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'<span class="hint">—</span>'}</td>
     <td class="mono">${a.codigo||'—'}</td>
     <td>${a.restricaoAlimentar ? `🍽️ ${a.restricoesAlimentares}` : '<span class="hint">Não</span>'}</td>
@@ -4877,7 +4877,7 @@ function openEditInscritoModal(id){
   editInscritoId = id;
 
   const teamSel = document.getElementById('editInscritoequipe');
-  teamSel.innerHTML = STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${t.label}</option>`).join('');
+  teamSel.innerHTML = STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('');
   teamSel.value = a.teamId;
 
   document.getElementById('editInscritoNome').value = a.nome;
@@ -4886,7 +4886,7 @@ function openEditInscritoModal(id){
 
   const modOptions = inscritoModalidadeOptions();
   const modosChecks = document.getElementById('editInscritoModalidadesChecks');
-  modosChecks.innerHTML = modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="editAlModCheck" value="${o.key}" ${(a.modalidades||[]).includes(o.key)?'checked':''}> ${o.label}</label>`).join('');
+  modosChecks.innerHTML = modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="editAlModCheck" value="${o.key}" ${(a.modalidades||[]).includes(o.key)?'checked':''}> ${escPdf(o.label)}</label>`).join('');
 
   const temRestricao = !!a.restricaoAlimentar;
   document.getElementById('editInscritoTemRestricao').value = temRestricao ? 'sim' : 'nao';
@@ -5739,7 +5739,7 @@ function registrarAlimentacaoComValor(valorDigitado, origemInputId){
   const dataRegistro = new Date(ts).toLocaleDateString('pt-BR');
   const horario = new Date(ts).toLocaleTimeString('pt-BR');
   let modalHtml = `<h2 style="color:var(--navy); margin-top:0;">Alimentação registrada</h2>
-    <p><strong>${inscrito.nome}</strong> (${teamChip(inscrito.teamId, inscrito.genero)}) — código: <span class="mono">${inscrito.codigo||'—'}</span><br>Data: <span class="mono">${dataRegistro}</span> — Horário: <span class="mono">${horario}</span></p>`;
+    <p><strong>${escPdf(inscrito.nome)}</strong> (${teamChip(inscrito.teamId, inscrito.genero)}) — código: <span class="mono">${inscrito.codigo||'—'}</span><br>Data: <span class="mono">${dataRegistro}</span> — Horário: <span class="mono">${horario}</span></p>`;
   if(!inscrito.restricaoAlimentar || !inscrito.restricoesAlimentares){
     modalHtml += `<p style="color:var(--green); font-weight:600;">✅ Não há restrições para o estudante no cardápio.</p>`;
   } else {
@@ -5903,7 +5903,7 @@ function renderAlimentacao(){
     <div class="row" style="margin-bottom:10px;">
       <div class="field"><label class="f-label">Filtrar por equipe</label><select id="checkinFiltroequipe">
         <option value="todas">Todas as Equipes</option>
-        ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${checkinFiltroequipe===t.id?'selected':''}>${t.label}</option>`).join('')}
+        ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${checkinFiltroequipe===t.id?'selected':''}>${escPdf(t.label)}</option>`).join('')}
       </select></div>
     </div>
     <table><thead><tr><th>Inscrito</th><th>equipe</th><th>Data</th><th>Horário</th><th></th></tr></thead><tbody id="checkinsBody"></tbody></table>
@@ -6295,7 +6295,7 @@ function renderSumulaDetail(gameId){
   const resumoHtml = tiposModalidade.map(tipo=>{
     const countA = sumula.eventos.filter(e=>e.tipo===tipo.key && e.teamSide==='A').length;
     const countB = sumula.eventos.filter(e=>e.tipo===tipo.key && e.teamSide==='B').length;
-    return `<tr><td>${tipo.label}${tipo.contaPlacar?` <span class="badge">conta ${tipo.valor||1} no placar</span>`:''}</td><td class="mono">${countA}</td><td class="mono">${countB}</td></tr>`;
+    return `<tr><td>${escPdf(tipo.label)}${tipo.contaPlacar?` <span class="badge">conta ${tipo.valor||1} no placar</span>`:''}</td><td class="mono">${countA}</td><td class="mono">${countB}</td></tr>`;
   }).join('');
 
   const logHtml = sumula.eventos.length===0 ? `<p class="hint">Nenhum lançamento registrado ainda.</p>` :
@@ -6314,11 +6314,11 @@ function renderSumulaDetail(gameId){
       const alergiaTag = a.alergiaMedicamento ? `<span title="Alergia(s) a medicamento: ${a.alergias.replace(/"/g,'&quot;')}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
       const restricaoTag = a.restricaoAlimentar ? `<span title="Restrição(ões) alimentar(es): ${a.restricoesAlimentares.replace(/"/g,'&quot;')}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
       return `<div class="game-card" data-inscrito="${a.id}" data-side="${side}">
-      <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${a.nome}${alergiaTag}${restricaoTag}</span></div>
+      <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
       <div class="pill-group">
         ${tiposModalidade.map(tipo=>{
           const count = sumula.eventos.filter(e=>e.studentId===a.id && e.tipo===tipo.key).length;
-          return `<button class="pill lancamentoBtn" data-tipo="${tipo.key}" ${adminDisabled()}>${tipo.label}${count>0?` (${count})`:''}</button>`;
+          return `<button class="pill lancamentoBtn" data-tipo="${tipo.key}" ${adminDisabled()}>${escPdf(tipo.label)}${count>0?` (${count})`:''}</button>`;
         }).join('')}
       </div>
     </div>`;
@@ -6348,8 +6348,8 @@ function renderSumulaDetail(gameId){
       <div class="field"><label class="f-label">Placar — ${teamChip(game.teamB, game.genero)}</label><input type="number" min="0" class="score-input sdScoreB" value="${game.scoreB??''}" ${game.wo || !isAdmin || sumula.eventos.length>0?'disabled':''} placeholder="-"></div>
       <div class="field"><label class="f-label">W.O.</label><select class="sdWoSelect" ${adminDisabled()}>
         <option value="">Nenhum</option>
-        <option value="A" style="${teamOptionStyle(game.teamA, game.genero)}" ${game.wo==='A'?'selected':''}>${teamLabel(game.teamA)} faltou</option>
-        <option value="B" style="${teamOptionStyle(game.teamB, game.genero)}" ${game.wo==='B'?'selected':''}>${teamLabel(game.teamB)} faltou</option>
+        <option value="A" style="${teamOptionStyle(game.teamA, game.genero)}" ${game.wo==='A'?'selected':''}>${escPdf(teamLabel(game.teamA))} faltou</option>
+        <option value="B" style="${teamOptionStyle(game.teamB, game.genero)}" ${game.wo==='B'?'selected':''}>${escPdf(teamLabel(game.teamB))} faltou</option>
       </select></div>
       <div class="field"><label class="f-label">Jogo Limpo — ${teamChip(game.teamA, game.genero)}</label><select class="sdFpA" ${adminDisabled()}>
         <option value="">—</option>${['A','B','C','D','E'].map(l=>`<option value="${l}" ${game.fpA===l?'selected':''}>${l}</option>`).join('')}
@@ -7074,7 +7074,7 @@ function renderAjustesContentHtml(){
   return (isAdmin ? `<div class="card"><h2>Ajustes e Penalidades</h2>
     <p class="hint">Lance acréscimos ou descontos manuais — ex.: instrumentos sonoros (−50 pts), infração leve/moderada/grave (−5/−10/−15 pts), decisões da Comissão Disciplinar, etc.</p>
     <div class="row">
-      <div class="field"><label class="f-label">equipe</label><select id="ajTeam">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${t.label}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">equipe</label><select id="ajTeam">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Motivo</label><input type="text" id="ajMotivo" placeholder="Ex.: uso de corneta na torcida" style="width:260px;"></div>
       <div class="field"><label class="f-label">Pontos (+/-)</label><input type="number" id="ajPontos" value="-5" style="width:90px;"></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ajAdd">Adicionar</button></div>
