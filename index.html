@@ -1394,9 +1394,9 @@ function roundRobinPairs(ids){
   return pairs;
 }
 
-/* Cada equipe agora carrega um campo `genero` ('M', 'F' ou 'X' para misto) — ver o
+/* Cada equipe agora carrega um campo `genero` ('M', 'F' ou 'X' para ambos) — ver o
    seletor na aba Inscrições → Equipes. Times 'M'/'F' só entram no bracket
-   correspondente; times 'X' (misto) entram nos dois, preservando o comportamento
+   correspondente; times 'X' (ambos) entram nos dois, preservando o comportamento
    antigo (quando toda equipe jogava automaticamente nas duas categorias) para quem não
    migrar explicitamente para Masculino/Feminino. */
 function teamsParaGenero(teams, genero){
@@ -3892,11 +3892,11 @@ function renderEquipesContentHtml(){
   const aglutinadores = STATE.aglutinadores;
   return `<div class="card">
     <h2>Equipes</h2>
-    <p class="hint">${isAdmin ? 'Adicione ou remova Equipes. Ao remover, todos os jogos, colocações, pontos de desfile e ajustes dessa equipe também são apagados. Equipes do mesmo gênero jogam entre si; equipes "Misto" entram nos jogos masculinos e femininos.' : 'Faça login como administrador para adicionar ou remover Equipes.'}</p>
+    <p class="hint">${isAdmin ? 'Adicione ou remova Equipes. Ao remover, todos os jogos, colocações, pontos de desfile e ajustes dessa equipe também são apagados. Equipes do mesmo gênero jogam entre si; equipes "Ambos" entram nos jogos masculinos e femininos.' : 'Faça login como administrador para adicionar ou remover Equipes.'}</p>
     ${isAdmin ? `<div class="row">
       <div class="field"><label class="f-label">Nome da equipe</label><input type="text" id="ntLabel" placeholder="Ex.: 6ºD" style="width:180px;"></div>
       <div class="field"><label class="f-label">Gênero</label><select id="ntGenero" style="width:130px;">
-        <option value="X">Misto</option>
+        <option value="X">Ambos</option>
         <option value="M">Masculino</option>
         <option value="F">Feminino</option>
       </select></div>
@@ -4034,10 +4034,10 @@ function renderAglutinadoresList(){
 }
 function renderTeamsBody(){
   const body = document.getElementById('teamsBody');
-  const generoLabel = {M:'Masculino', F:'Feminino', X:'Misto'};
+  const generoLabel = {M:'Masculino', F:'Feminino', X:'Ambos'};
   body.innerHTML = STATE.teams.map(t=>`<tr data-id="${t.id}"><td>${teamChip(t.id, null)}</td>
     <td>${isAdmin ? `<select class="teamGenero" style="font-size:12.5px;">
-        <option value="X" ${(t.genero||'X')==='X'?'selected':''}>Misto</option>
+        <option value="X" ${(t.genero||'X')==='X'?'selected':''}>Ambos</option>
         <option value="M" ${t.genero==='M'?'selected':''}>Masculino</option>
         <option value="F" ${t.genero==='F'?'selected':''}>Feminino</option>
       </select>` : generoLabel[t.genero||'X']}</td>
