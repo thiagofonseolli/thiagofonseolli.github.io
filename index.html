@@ -2509,6 +2509,7 @@ async function syncBaixarImagemSeNecessario(ref){
    Roda sozinho, pra QUALQUER pessoa com a página aberta — não precisa estar logada nem
    ativar nada. Nunca lança erro pra fora nem trava a interface; quem chama só confere
    syncStatus depois. */
+let syncUltimaPrimeiraPuxadaQtd = 0; // quantas linhas a última puxada inicial (só-puxar) trouxe — usado por init() para decidir se confirma de novo antes de aceitar "nuvem vazia"
 async function syncCiclo(){
   if(syncCicloEmAndamento) return;
   syncCicloEmAndamento = true;
@@ -2530,6 +2531,7 @@ async function syncCiclo(){
       // dos dados reais da nuvem, apagando-os para todo mundo. Por isso
       // syncPrimeiroCicloFeito só vira true quando a puxada realmente teve sucesso.
       const aplicadas = await syncPuxarNovidades();
+      syncUltimaPrimeiraPuxadaQtd = aplicadas;
       syncDetectarMudancasEAgendar(); // cria o retrato em cima dos dados já sincronizados
       syncPendentes.clear(); // descarta qualquer coisa que o retrato inicial tenha marcado
       syncPrimeiroCicloFeito = true;
@@ -7222,17 +7224,37 @@ function renderViewOnlyBanner(){
   loadState();
   syncCarregarConfig();
   atualizarSyncStatusUi();
+  // Projetos gratuitos do Supabase "hibernam" após um tempo sem uso — a primeiríssima
+  // requisição depois disso costuma responder rápido, mas VAZIA (sem erro nenhum,
+  // simplesmente sem os dados ainda), enquanto o banco acorda de verdade nos
+  // bastidores. Esse ping é descartável (resultado e erro são ignorados) só para
+  // absorver esse atraso antes da busca de verdade, que decide o que a pessoa vê.
+  try{ await syncRequisicao('GET', `/rest/v1/${SYNC_TABLE}?select=id&limit=1`); }catch(e){}
   // Espera a primeira sincronização dar certo de verdade antes de mostrar qualquer
   // coisa — ver o comentário dentro de syncCiclo() sobre por que seguir adiante com uma
   // falha aqui é perigoso (arrisca sobrescrever os dados reais da nuvem depois). Tenta
   // de novo com espera crescente (1s, 2s, 4s... até 15s) enquanto não conseguir.
   let tentativaSyncInicial = 0;
-  while(!syncPrimeiroCicloFeito){
+  let confirmacoesDeVazio = 0;
+  while(true){
     await syncCiclo();
-    if(syncPrimeiroCicloFeito) break;
-    tentativaSyncInicial++;
-    const espera = Math.min(15000, 1000 * Math.pow(2, tentativaSyncInicial-1));
-    await new Promise(r=> setTimeout(r, espera));
+    if(!syncPrimeiroCicloFeito){
+      tentativaSyncInicial++;
+      const espera = Math.min(15000, 1000 * Math.pow(2, tentativaSyncInicial-1));
+      await new Promise(r=> setTimeout(r, espera));
+      continue;
+    }
+    // Sincronizou com sucesso — mas se voltou completamente vazia logo de cara, ainda
+    // pode ser o banco terminando de acordar (ver aquecimento acima). Antes de aceitar
+    // que a nuvem realmente não tem nada (cenário legítimo: instalação nova, do zero),
+    // confirma mais uma ou duas vezes com um pequeno intervalo.
+    if(syncUltimaPrimeiraPuxadaQtd===0 && confirmacoesDeVazio<2){
+      confirmacoesDeVazio++;
+      syncPrimeiroCicloFeito = false; // repete o modo "só puxar" mais uma vez
+      await new Promise(r=> setTimeout(r, 3000));
+      continue;
+    }
+    break;
   }
   syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
   // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
