@@ -2521,9 +2521,18 @@ async function syncCiclo(){
       // dispositivo ainda) pareceria "tudo novo" e seria enviado por cima dos dados
       // reais que já existem no Supabase. O retrato de comparação (syncUltimoRetrato)
       // só é criado DEPOIS de já termos os dados de verdade (pós-pull).
+      //
+      // CRÍTICO: se essa primeira puxada falhar (rede instável, Supabase lento etc.), o
+      // dispositivo NÃO PODE seguir adiante como se tivesse dado certo — senão, no
+      // próximo ciclo automático, ele compararia o estado padrão/vazio local contra um
+      // retrato tão vazio quanto (nunca criado de verdade) e concluiria, errado, que
+      // TUDO é "novo" e precisa ser enviado — empurrando dados padrão/vazios por cima
+      // dos dados reais da nuvem, apagando-os para todo mundo. Por isso
+      // syncPrimeiroCicloFeito só vira true quando a puxada realmente teve sucesso.
       const aplicadas = await syncPuxarNovidades();
       syncDetectarMudancasEAgendar(); // cria o retrato em cima dos dados já sincronizados
       syncPendentes.clear(); // descarta qualquer coisa que o retrato inicial tenha marcado
+      syncPrimeiroCicloFeito = true;
       syncStatus = 'ok';
       syncLastSuccessAt = new Date();
       syncLastErrorMsg = '';
@@ -2542,8 +2551,11 @@ async function syncCiclo(){
   }catch(e){
     syncStatus = 'erro';
     syncLastErrorMsg = String(e.message||e);
+    // Não marca syncPrimeiroCicloFeito=true aqui: se a primeira puxada falhou, o
+    // dispositivo continua "sem dados reais ainda" e a próxima tentativa (seja o timer
+    // de 20s, seja o retry em init()) vai tentar de novo em modo só-puxar, em vez de
+    // arriscar comparar/enviar um estado que nunca foi confirmado contra a nuvem.
   }
-  syncPrimeiroCicloFeito = true;
   syncCicloEmAndamento = false;
   atualizarSyncStatusUi();
 }
@@ -7210,7 +7222,18 @@ function renderViewOnlyBanner(){
   loadState();
   syncCarregarConfig();
   atualizarSyncStatusUi();
-  await syncCiclo(); // primeira sincronização: puxa tudo o que já existe na nuvem
+  // Espera a primeira sincronização dar certo de verdade antes de mostrar qualquer
+  // coisa — ver o comentário dentro de syncCiclo() sobre por que seguir adiante com uma
+  // falha aqui é perigoso (arrisca sobrescrever os dados reais da nuvem depois). Tenta
+  // de novo com espera crescente (1s, 2s, 4s... até 15s) enquanto não conseguir.
+  let tentativaSyncInicial = 0;
+  while(!syncPrimeiroCicloFeito){
+    await syncCiclo();
+    if(syncPrimeiroCicloFeito) break;
+    tentativaSyncInicial++;
+    const espera = Math.min(15000, 1000 * Math.pow(2, tentativaSyncInicial-1));
+    await new Promise(r=> setTimeout(r, espera));
+  }
   syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
   // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
   // em STATE (agora populado pela sincronização acima) e migra automaticamente eventuais
