@@ -7279,11 +7279,12 @@ function renderViewOnlyBanner(){
     // Sincronizou com sucesso — mas se voltou completamente vazia logo de cara, ainda
     // pode ser o banco terminando de acordar (ver aquecimento acima). Antes de aceitar
     // que a nuvem realmente não tem nada (cenário legítimo: instalação nova, do zero),
-    // confirma mais uma ou duas vezes com um pequeno intervalo.
-    if(syncUltimaPrimeiraPuxadaQtd===0 && confirmacoesDeVazio<2){
+    // confirma várias vezes, com espera crescente — bancos muito "dormentes" podem
+    // levar bem mais que alguns segundos para responder de verdade.
+    if(syncUltimaPrimeiraPuxadaQtd===0 && confirmacoesDeVazio<6){
       confirmacoesDeVazio++;
       syncPrimeiroCicloFeito = false; // repete o modo "só puxar" mais uma vez
-      await new Promise(r=> setTimeout(r, 3000));
+      await new Promise(r=> setTimeout(r, Math.min(8000, 2000 * confirmacoesDeVazio)));
       continue;
     }
     break;
