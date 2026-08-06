@@ -2343,6 +2343,14 @@ function syncColecaoAplicarLinha(nomeColecao, linha){
   }
   if(idx>=0) arr[idx] = item; else arr.push(item);
 }
+/* Downloads de imagem disparados durante um pull (logo, fundo, fotos de crachá, foto de
+   inscrito) são assíncronos — sem isso, o pull "termina" antes da imagem realmente
+   chegar, e a tela renderiza sem ela (só aparecendo, se sorte, num próximo re-render por
+   outro motivo qualquer). Este array junta essas promises para syncPuxarNovidades()
+   esperar por todas antes de devolver o controle — garantindo que, quando o app decide
+   re-renderizar por causa de um pull, as imagens já estejam prontas. */
+let syncImagensPendentesDePull = [];
+
 function syncAplicarLinha(linha){
   const {tabela, registro_id, dados, deletado} = linha;
   if(SYNC_COLECOES[tabela]){ syncColecaoAplicarLinha(tabela, linha); return; }
@@ -2365,17 +2373,17 @@ function syncAplicarLinha(linha){
   if(tabela==='sumula_evento'){ syncAplicarEvento(linha); return; }
   if(tabela==='inscrito_foto'){
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
-    if(a){ a.foto = deletado ? '' : (dados||''); if(a.foto) syncBaixarImagemSeNecessario(a.foto); }
+    if(a){ a.foto = deletado ? '' : (dados||''); if(a.foto) syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(a.foto)); }
     return;
   }
   if(tabela==='config'){
     if(dados==null) return;
     if(registro_id==='eventName') STATE.eventName = dados;
     else if(registro_id==='headerTexto') STATE.header.subtitle = dados.subtitle||'';
-    else if(registro_id==='headerLogoRef'){ STATE.header.logoDataUrl = dados; syncBaixarImagemSeNecessario(dados); }
-    else if(registro_id==='headerBgRef'){ STATE.header.bgDataUrl = dados; syncBaixarImagemSeNecessario(dados); }
-    else if(registro_id==='crachaLogo1Ref'){ STATE.crachaLogos.logo1 = dados; syncBaixarImagemSeNecessario(dados); }
-    else if(registro_id==='crachaLogo2Ref'){ STATE.crachaLogos.logo2 = dados; syncBaixarImagemSeNecessario(dados); }
+    else if(registro_id==='headerLogoRef'){ STATE.header.logoDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
+    else if(registro_id==='headerBgRef'){ STATE.header.bgDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
+    else if(registro_id==='crachaLogo1Ref'){ STATE.crachaLogos.logo1 = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
+    else if(registro_id==='crachaLogo2Ref'){ STATE.crachaLogos.logo2 = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
     else if(registro_id==='sumulaTipos') STATE.sumulaTipos = dados;
     else if(registro_id==='regras') STATE.regras = dados;
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
@@ -2475,6 +2483,7 @@ async function syncPuxarNovidades(){
     `/rest/v1/${SYNC_TABLE}?atualizado_em=gt.${encodeURIComponent(desde)}&order=atualizado_em.asc&limit=2000`);
   if(!linhas || !linhas.length) return 0;
   let aplicadas = 0, maiorTimestamp = desde;
+  syncImagensPendentesDePull = [];
   linhas.forEach(linha=>{
     if(linha.atualizado_em > maiorTimestamp) maiorTimestamp = linha.atualizado_em;
     if(linha.dispositivo === syncDeviceId) return; // não precisa reaplicar o que este dispositivo mandou
@@ -2482,6 +2491,7 @@ async function syncPuxarNovidades(){
     else syncAplicarLinha(linha);
     aplicadas++;
   });
+  if(syncImagensPendentesDePull.length) await Promise.all(syncImagensPendentesDePull);
   syncSalvarLastPull(maiorTimestamp);
   return aplicadas;
 }
