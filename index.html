@@ -81,6 +81,13 @@
   .team-chip.block{display:block; width:100%; text-align:center; box-sizing:border-box;}
   .score-input{width:56px; text-align:center; font-family:'Space Mono',monospace; font-weight:700;}
   .game-extra{display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; align-items:flex-end;}
+  .game-row-summary{display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;}
+  .game-row-info{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .game-row-teams{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .game-row-meta{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .expand-chevron{color:var(--muted); font-size:12px; width:14px; text-align:center;}
+  .game-row-panel{margin-top:12px; padding-top:12px; border-top:1px dashed var(--border); display:flex; flex-direction:column; gap:12px;}
+  .game-row-panel .card{margin-bottom:0;}
   .badge{font-family:'Space Mono',monospace; font-size:10.5px; padding:2px 6px; border-radius:3px; background:var(--bg); color:var(--muted);}
   .badge.done{background:#E4F5EA; color:var(--green);}
 
@@ -3013,7 +3020,6 @@ const TABS = [
   {id:'gerador', label:'Gerador de Tabela'},
   {id:'inscricoes', label:'Inscrições'},
   {id:'alimentacao', label:'Alimentação'},
-  {id:'sumulas', label:'Súmulas'},
   {id:'edital', label:'Edital (Regulamento)'},
 ];
 function renderTabs(){
@@ -3102,6 +3108,7 @@ function renderPainel(){
 
 /* ===================== JOGOS ===================== */
 let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos';
+let expandedGameId = null; // id do jogo com o painel de detalhes/súmula aberto na aba Jogos (só um por vez)
 
 function renderJogos(){
   const modalidadesOpts = [['todas','Todas'], ...STATE.modalidades.map(m=>[m,m])];
@@ -3168,66 +3175,77 @@ function renderGamesList(){
   });
   const container = document.getElementById('gamesList');
   if(games.length===0){ container.innerHTML = `<div class="card"><p class="hint">Nenhuma partida encontrada com esses filtros.</p></div>`; return; }
-  container.innerHTML = `<div class="card">` + games.map(g=>{
-    const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
-    return `<div class="game-card" data-id="${g.id}">
-      <div class="game-top">
-        <span>${g.modalidade} · ${g.genero==='F'?'Feminino':'Masculino'}</span>
-        <span><span class="badge ${done?'done':''}">${done?'Concluído':'Pendente'}</span> <button class="btn secondary small abrirSumulaBtn">📋 Ver súmula</button> ${isAdmin?'<button class="btn danger small removeGame">✕ Remover</button>':''}</span>
-      </div>
-      <div class="game-teams">
-        ${teamChip(g.teamA, g.genero, 'team-name')}
-        <input type="number" min="0" class="score-input scoreA" value="${g.scoreA??''}" ${g.wo || !isAdmin?'disabled':''} placeholder="-">
-        <input type="number" min="0" class="score-input scoreB" value="${g.scoreB??''}" ${g.wo || !isAdmin?'disabled':''} placeholder="-">
-        ${teamChip(g.teamB, g.genero, 'team-name b')}
-      </div>
-      <div class="game-extra">
-        <div class="field"><label class="f-label">W.O.</label><select class="woSelect" ${adminDisabled()}>
-          <option value="">Nenhum</option>
-          <option value="A" style="${teamOptionStyle(g.teamA, g.genero)}" ${g.wo==='A'?'selected':''}>${escPdf(teamLabel(g.teamA))} faltou</option>
-          <option value="B" style="${teamOptionStyle(g.teamB, g.genero)}" ${g.wo==='B'?'selected':''}>${escPdf(teamLabel(g.teamB))} faltou</option>
-        </select></div>
-        <div class="field"><label class="f-label">Jogo Limpo — ${teamChip(g.teamA, g.genero)}</label><select class="fpA" ${adminDisabled()}>
-          <option value="">—</option>${['A','B','C','D','E'].map(l=>`<option value="${l}" ${g.fpA===l?'selected':''}>${l}</option>`).join('')}
-        </select></div>
-        <div class="field"><label class="f-label">Jogo Limpo — ${teamChip(g.teamB, g.genero)}</label><select class="fpB" ${adminDisabled()}>
-          <option value="">—</option>${['A','B','C','D','E'].map(l=>`<option value="${l}" ${g.fpB===l?'selected':''}>${l}</option>`).join('')}
-        </select></div>
-        <div class="field"><label class="f-label">Data</label><input type="date" class="dataInput" value="${g.data||''}" ${adminDisabled()}></div>
-        <div class="field"><label class="f-label">Hora</label><input type="time" class="horaInput" value="${g.hora||''}" ${adminDisabled()}></div>
-        <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Local</label><input type="text" class="localInput" value="${g.local||''}" placeholder="Quadra 1" ${adminDisabled()}></div>
-      </div>
-    </div>`;
-  }).join('') + `</div>`;
+  container.innerHTML = `<div class="card">` + games.map(g=> gameRowHtml(g)).join('') + `</div>`;
 
-  container.querySelectorAll('.game-card').forEach(card=>{
+  container.querySelectorAll('.game-row').forEach(card=>{
     const id = Number(card.dataset.id);
-    const game = STATE.games.find(g=>g.id===id);
-    const scoreA = card.querySelector('.scoreA'), scoreB = card.querySelector('.scoreB');
-    const woSelect = card.querySelector('.woSelect'), fpA = card.querySelector('.fpA'), fpB = card.querySelector('.fpB');
-    const dataInput = card.querySelector('.dataInput'), horaInput = card.querySelector('.horaInput'), localInput = card.querySelector('.localInput');
-    const removeBtn = card.querySelector('.removeGame');
-    const sumulaBtn = card.querySelector('.abrirSumulaBtn');
-    sumulaBtn.addEventListener('click', ()=>{
-      activeTab = 'sumulas';
-      activeSumulaGameId = id;
-      renderAll();
-    });
+    wireGameRowEvents(id, card);
+    if(expandedGameId===id){
+      const panel = card.querySelector('.game-row-panel');
+      if(panel) wireGameDetailPanelEvents(id, panel);
+    }
+  });
+}
 
-    scoreA.addEventListener('input', ()=>{ game.scoreA = scoreA.value===''?null:Number(scoreA.value); markDirty(); syncMarcarSujoGame(id); renderScoreboard(); });
-    scoreB.addEventListener('input', ()=>{ game.scoreB = scoreB.value===''?null:Number(scoreB.value); markDirty(); syncMarcarSujoGame(id); renderScoreboard(); });
-    woSelect.addEventListener('change', ()=>{ game.wo = woSelect.value || null; if(game.wo){game.scoreA=null; game.scoreB=null;} markDirty(); syncMarcarSujoGame(id); renderGamesList(); renderScoreboard(); });
-    fpA.addEventListener('change', ()=>{ game.fpA = fpA.value || null; markDirty(); syncMarcarSujoGame(id); renderScoreboard(); });
-    fpB.addEventListener('change', ()=>{ game.fpB = fpB.value || null; markDirty(); syncMarcarSujoGame(id); renderScoreboard(); });
-    dataInput.addEventListener('change', ()=>{ game.data = dataInput.value; markDirty(); syncMarcarSujoGame(id); });
-    horaInput.addEventListener('change', ()=>{ game.hora = horaInput.value; markDirty(); syncMarcarSujoGame(id); });
-    localInput.addEventListener('input', ()=>{ game.local = localInput.value; markDirty(); syncMarcarSujoGame(id); });
-    if(removeBtn) removeBtn.addEventListener('click', ()=>{
-      if(!confirm('Remover esta partida? Essa ação não pode ser desfeita.')) return;
-      STATE.games = STATE.games.filter(g=>g.id!==id);
-      delete STATE.sumulas[id];
-      markDirty(); renderGamesList(); renderScoreboard();
-    });
+/* Uma linha compacta por jogo: modalidade, gênero e as duas Equipes já dão pra localizar
+   o jogo certo numa lista longa sem precisar abrir nada. Clicar em qualquer parte da
+   linha (fora do botão "Remover") expande/recolhe o painel completo — placar, W.O.,
+   Jogo Limpo, súmula inteira — logo abaixo, dentro do mesmo card (ver
+   buildGameDetailHtml). Só um jogo fica expandido por vez. */
+function gameRowHtml(g){
+  const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
+  const nLancamentos = (STATE.sumulas[g.id]?.eventos||[]).length;
+  const placarTxt = g.wo ? (g.wo==='A' ? 'W.O.' : 'W.O.') : (done ? `${g.scoreA??0} × ${g.scoreB??0}` : 'vs');
+  const expanded = expandedGameId===g.id;
+  return `<div class="game-card game-row" data-id="${g.id}">
+    <div class="game-row-summary" style="cursor:pointer;">
+      <div class="game-row-info">
+        <span class="badge">${escPdf(g.modalidade)} · ${g.genero==='F'?'Feminino':'Masculino'}</span>
+        <span class="game-row-teams">${teamChip(g.teamA, g.genero)} <span class="mono" style="font-weight:700; font-size:13px;">${placarTxt}</span> ${teamChip(g.teamB, g.genero)}</span>
+      </div>
+      <div class="game-row-meta">
+        ${g.data ? `<span class="hint mono" style="margin:0;">${g.data.split('-').reverse().join('/')}${g.hora?(' '+g.hora):''}</span>` : ''}
+        ${nLancamentos>0 ? `<span class="badge">${nLancamentos} lanç.</span>` : ''}
+        <span class="badge ${done?'done':''}">${done?'Concluído':'Pendente'}</span>
+        ${isAdmin?'<button class="btn danger small removeGame" title="Remover partida">✕</button>':''}
+        <span class="expand-chevron">${expanded?'▾':'▸'}</span>
+      </div>
+    </div>
+    ${expanded ? `<div class="game-row-panel">${buildGameDetailHtml(g.id)}</div>` : ''}
+  </div>`;
+}
+
+/* Atualiza só a linha (colapsada) de um jogo específico — usado depois de uma edição
+   feita DENTRO do painel expandido (ex.: mudar o placar), pra manter a linha resumida em
+   dia sem precisar redesenhar a lista inteira nem fechar o painel. */
+function renderGameSummaryRow(id){
+  const card = document.querySelector(`.game-row[data-id="${id}"]`);
+  if(!card) return;
+  const summary = card.querySelector('.game-row-summary');
+  const g = STATE.games.find(x=>x.id===id);
+  if(!g || !summary) return;
+  const temp = document.createElement('div');
+  temp.innerHTML = gameRowHtml(g);
+  const novoSummary = temp.querySelector('.game-row-summary');
+  summary.innerHTML = novoSummary.innerHTML;
+  wireGameRowEvents(id, card);
+}
+
+function wireGameRowEvents(id, card){
+  const summary = card.querySelector('.game-row-summary');
+  const removeBtn = card.querySelector('.removeGame');
+  summary.addEventListener('click', (e)=>{
+    if(e.target.closest('.removeGame')) return;
+    expandedGameId = (expandedGameId===id) ? null : id;
+    renderGamesList();
+  });
+  if(removeBtn) removeBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    if(!confirm('Remover esta partida? Essa ação não pode ser desfeita.')) return;
+    STATE.games = STATE.games.filter(g=>g.id!==id);
+    delete STATE.sumulas[id];
+    if(expandedGameId===id) expandedGameId = null;
+    markDirty(); renderGamesList(); renderScoreboard();
   });
 }
 
@@ -6024,9 +6042,8 @@ function renderCheckinsBody(){
   });
 }
 
-/* ===================== SÚMULAS ===================== */
-let sumulaFiltroModalidade = 'todas', sumulaFiltroGenero = 'todos', sumulaFiltroStatus = 'todos';
-let activeSumulaGameId = null;
+/* ===================== SÚMULAS (funções auxiliares — a interface agora vive dentro
+   da aba "Jogos", ver buildGameDetailHtml/wireGameDetailPanelEvents mais abaixo) ===== */
 
 function getSumula(gameId){
   if(!STATE.sumulas[gameId]) STATE.sumulas[gameId] = {eventos:[]};
@@ -6216,76 +6233,14 @@ function gerarSumulaPdf(gameId){
   setTimeout(()=>{ win.print(); }, 300);
 }
 
-function renderSumulas(){
-  if(activeSumulaGameId!=null && STATE.games.some(g=>g.id===activeSumulaGameId)){
-    renderSumulaDetail(activeSumulaGameId);
-    return;
-  }
-  activeSumulaGameId = null;
-  const modalidadesOpts = [['todas','Todas'], ...STATE.modalidades.map(m=>[m,m])];
-  const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino']];
-  const status = [['todos','Todos'],['comSumula','Com lançamentos'],['semSumula','Ainda sem lançamentos']];
-
-  let html = `<div class="card">
-    <h2>Súmulas dos Jogos</h2>
-    <p class="hint">Escolha uma partida para abrir a súmula: registre gols, cartões, faltas e outras ocorrências de cada inscrito, com placar e resumo calculados automaticamente.</p>
-    <div class="row" style="margin-bottom:6px;">
-      <div class="field"><label class="f-label">Modalidade</label><select id="smModalidade">${modalidadesOpts.map(([v,l])=>`<option value="${v}" ${sumulaFiltroModalidade===v?'selected':''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Gênero</label><select id="smGenero">${generos.map(([v,l])=>`<option value="${v}" ${sumulaFiltroGenero===v?'selected':''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Status</label><select id="smStatus">${status.map(([v,l])=>`<option value="${v}" ${sumulaFiltroStatus===v?'selected':''}>${l}</option>`).join('')}</select></div>
-    </div>
-  </div>
-  <div id="sumulasList"></div>`;
-  document.getElementById('main').innerHTML = html;
-  ['smModalidade','smGenero','smStatus'].forEach(id=>{
-    document.getElementById(id).addEventListener('change', (e)=>{
-      if(id==='smModalidade') sumulaFiltroModalidade=e.target.value;
-      if(id==='smGenero') sumulaFiltroGenero=e.target.value;
-      if(id==='smStatus') sumulaFiltroStatus=e.target.value;
-      renderSumulasList();
-    });
-  });
-  renderSumulasList();
-}
-
-function renderSumulasList(){
-  let games = STATE.games.filter(g=>{
-    if(sumulaFiltroModalidade!=='todas' && g.modalidade!==sumulaFiltroModalidade) return false;
-    if(sumulaFiltroGenero!=='todos' && g.genero!==sumulaFiltroGenero) return false;
-    const temLancamentos = STATE.sumulas[g.id] && (STATE.sumulas[g.id].eventos||[]).length>0;
-    if(sumulaFiltroStatus==='comSumula' && !temLancamentos) return false;
-    if(sumulaFiltroStatus==='semSumula' && temLancamentos) return false;
-    return true;
-  });
-  const container = document.getElementById('sumulasList');
-  if(games.length===0){ container.innerHTML = `<div class="card"><p class="hint">Nenhuma partida encontrada com esses filtros.</p></div>`; return; }
-  container.innerHTML = `<div class="card">` + games.map(g=>{
-    const nLancamentos = (STATE.sumulas[g.id]?.eventos||[]).length;
-    return `<div class="game-card" data-id="${g.id}">
-      <div class="game-top">
-        <span>${g.modalidade} · ${g.genero==='F'?'Feminino':'Masculino'}</span>
-        <span class="badge ${nLancamentos>0?'done':''}">${nLancamentos} lançamento(s)</span>
-      </div>
-      <div class="game-teams">
-        ${teamChip(g.teamA, g.genero, 'team-name')}
-        <span class="mono" style="font-weight:700;">${g.scoreA??'-'}</span>
-        <span class="mono" style="font-weight:700;">${g.scoreB??'-'}</span>
-        ${teamChip(g.teamB, g.genero, 'team-name b')}
-      </div>
-      <div style="margin-top:8px;"><button class="btn small abrirSumula">📋 Abrir súmula</button></div>
-    </div>`;
-  }).join('') + `</div>`;
-  container.querySelectorAll('.abrirSumula').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      activeSumulaGameId = Number(btn.closest('.game-card').dataset.id);
-      renderSumulaDetail(activeSumulaGameId);
-    });
-  });
-}
-
-function renderSumulaDetail(gameId){
+/* Monta o HTML do painel de detalhes de um jogo — placar/W.O./Jogo Limpo/data/hora/local
+   (antes só na aba Jogos) + súmula completa (antes uma aba própria): escalação com
+   lançamentos por inscrito, resumo por tipo de ocorrência, registro cronológico,
+   observações gerais e exportação em PDF. Fica embutido dentro do próprio card do jogo,
+   na aba "Jogos", abrindo/fechando ao clicar na linha — ver renderGamesList(). */
+function buildGameDetailHtml(gameId){
   const game = STATE.games.find(g=>g.id===gameId);
-  if(!game){ activeSumulaGameId=null; renderSumulas(); return; }
+  if(!game) return '';
   const sumula = getSumula(game.id);
   recomputarPlacarSumula(game);
   const inscritosA = inscritosDaSumula(game,'A');
@@ -6303,7 +6258,7 @@ function renderSumulaDetail(gameId){
     sumula.eventos.slice().reverse().map(ev=>{
       const inscrito = STATE.inscritos.find(a=>a.id===ev.studentId);
       const teamId = ev.teamSide==='A'?game.teamA:game.teamB;
-      return `<tr data-evid="${ev.id}"><td>${inscrito?inscrito.nome:'Inscrito removido'}</td><td>${teamChip(teamId, game.genero)}</td><td>${tipoInfo(ev.tipo, game.modalidade).label}</td>
+      return `<tr data-evid="${ev.id}"><td>${inscrito?escPdf(inscrito.nome):'Inscrito removido'}</td><td>${teamChip(teamId, game.genero)}</td><td>${escPdf(tipoInfo(ev.tipo, game.modalidade).label)}</td>
         <td class="mono">${new Date(ev.ts).toLocaleTimeString('pt-BR')}</td>
         <td>${isAdmin?'<button class="btn danger small removeEvento">✕</button>':''}</td></tr>`;
     }).join('') + `</tbody></table>`;
@@ -6311,8 +6266,8 @@ function renderSumulaDetail(gameId){
   function rosterHtml(inscritos, side){
     if(inscritos.length===0) return `<p class="hint">Nenhum inscrito cadastrado nesta modalidade/gênero para esta equipe. Cadastre em "Inscritos".</p>`;
     return inscritos.map(a=>{
-      const alergiaTag = a.alergiaMedicamento ? `<span title="Alergia(s) a medicamento: ${a.alergias.replace(/"/g,'&quot;')}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
-      const restricaoTag = a.restricaoAlimentar ? `<span title="Restrição(ões) alimentar(es): ${a.restricoesAlimentares.replace(/"/g,'&quot;')}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
+      const alergiaTag = a.alergiaMedicamento ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
+      const restricaoTag = a.restricaoAlimentar ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
       return `<div class="game-card" data-inscrito="${a.id}" data-side="${side}">
       <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
       <div class="pill-group">
@@ -6325,24 +6280,10 @@ function renderSumulaDetail(gameId){
     }).join('');
   }
 
-  const html = `
-  <div class="card">
-    <div class="row" style="justify-content:space-between; align-items:flex-start;">
-      <div>
-        <h2 style="margin-bottom:2px;">Súmula — ${game.modalidade} (${game.genero==='F'?'Feminino':'Masculino'})</h2>
-        <p class="hint" style="margin:0;">${game.data||'sem data'} ${game.hora||''} ${game.local?('· '+game.local):''}</p>
-      </div>
-      <div style="text-align:right;">
-        <div class="sb-label" style="color:var(--muted); letter-spacing:0.1em; font-size:11px;">PLACAR</div>
-        <div class="mono" style="font-size:26px; font-weight:700; color:var(--navy);">${teamChip(game.teamA, game.genero)} ${game.scoreA??0} × ${game.scoreB??0} ${teamChip(game.teamB, game.genero)}</div>
-      </div>
-    </div>
-    <button class="btn secondary small" id="voltarSumulas" style="margin-top:10px;">← Voltar à lista de súmulas</button>
-  </div>
-
-  <div class="card">
-    <h2>Detalhes da Partida</h2>
-    <p class="hint">Estes campos são os mesmos da aba "Jogos" — qualquer alteração feita aqui também aparece lá, e vice-versa.${sumula.eventos.length>0 ? ' O placar abaixo está travado porque já existem lançamentos de gol nesta súmula — para mudá-lo, ajuste ou remova os lançamentos na seção de inscritos, mais abaixo.' : ''}</p>
+  return `
+  <div class="card" style="background:var(--bg);">
+    <h2 style="font-size:15px;">Placar, W.O., Jogo Limpo e local</h2>
+    <p class="hint">${sumula.eventos.length>0 ? 'O placar abaixo está travado porque já existem lançamentos de gol nesta súmula — para mudá-lo, ajuste ou remova os lançamentos na escalação, mais abaixo.' : 'Preencha o placar aqui, ou deixe que ele seja calculado automaticamente a partir dos lançamentos de gol na escalação, mais abaixo.'}</p>
     <div class="game-extra" style="margin-top:0;">
       <div class="field"><label class="f-label">Placar — ${teamChip(game.teamA, game.genero)}</label><input type="number" min="0" class="score-input sdScoreA" value="${game.scoreA??''}" ${game.wo || !isAdmin || sumula.eventos.length>0?'disabled':''} placeholder="-"></div>
       <div class="field"><label class="f-label">Placar — ${teamChip(game.teamB, game.genero)}</label><input type="number" min="0" class="score-input sdScoreB" value="${game.scoreB??''}" ${game.wo || !isAdmin || sumula.eventos.length>0?'disabled':''} placeholder="-"></div>
@@ -6364,67 +6305,84 @@ function renderSumulaDetail(gameId){
   </div>
 
   <div class="card">
-    <h2>Resumo dos Lançamentos</h2>
+    <h2 style="font-size:15px;">Resumo dos Lançamentos</h2>
     <table><thead><tr><th>Ocorrência</th><th>${teamChip(game.teamA, game.genero)}</th><th>${teamChip(game.teamB, game.genero)}</th></tr></thead><tbody>${resumoHtml}</tbody></table>
   </div>
 
   ${isAdmin ? `<div class="card">
-    <h2>Adicionar nova variável — ${escPdf(game.modalidade)}</h2>
-    <p class="hint">Crie um novo tipo de lançamento específico da modalidade <strong>${escPdf(game.modalidade)}</strong> (ex.: "Substituição", "Advertência técnica"). Ele passa a aparecer como botão para cada inscrito nas súmulas de ${escPdf(game.modalidade)} — as demais modalidades não são afetadas.</p>
+    <h2 style="font-size:15px;">Adicionar nova variável — ${escPdf(game.modalidade)}</h2>
+    <p class="hint">Crie um novo tipo de lançamento específico da modalidade <strong>${escPdf(game.modalidade)}</strong> (ex.: "Substituição", "Advertência técnica"). Ele passa a aparecer como botão para cada inscrito na escalação abaixo, só em jogos de ${escPdf(game.modalidade)} — as demais modalidades não são afetadas.</p>
     <div class="row">
-      <div class="field"><label class="f-label">Nome da variável</label><input type="text" id="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="stContaPlacar"> Conta como ponto no placar</label></div>
-      <div class="field"><label class="f-label">Valor no placar</label><input type="number" id="stValor" value="1" min="1" style="width:70px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="stAdd">+ Adicionar variável</button></div>
+      <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
+      <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
+      <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
+      <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
     </div>
   </div>` : ''}
 
   <div class="row" style="gap:16px; align-items:flex-start;">
-    <div style="flex:1; min-width:300px;">
-      <div class="card"><h2 style="font-size:16px;">${teamChip(game.teamA, game.genero)}</h2>${rosterHtml(inscritosA,'A')}</div>
+    <div style="flex:1; min-width:280px;">
+      <div class="card"><h2 style="font-size:15px;">Escalação — ${teamChip(game.teamA, game.genero)}</h2>${rosterHtml(inscritosA,'A')}</div>
     </div>
-    <div style="flex:1; min-width:300px;">
-      <div class="card"><h2 style="font-size:16px;">${teamChip(game.teamB, game.genero)}</h2>${rosterHtml(inscritosB,'B')}</div>
+    <div style="flex:1; min-width:280px;">
+      <div class="card"><h2 style="font-size:15px;">Escalação — ${teamChip(game.teamB, game.genero)}</h2>${rosterHtml(inscritosB,'B')}</div>
     </div>
   </div>
 
   <div class="card">
-    <h2>Registro Cronológico</h2>
+    <h2 style="font-size:15px;">Registro Cronológico</h2>
     ${logHtml}
   </div>
 
   <div class="card">
-    <h2>Observações Gerais</h2>
+    <h2 style="font-size:15px;">Observações Gerais</h2>
     <p class="hint">Anotações livres sobre esta partida — ocorrências não previstas nas variáveis acima, observações da arbitragem, justificativas, etc.</p>
-    <textarea id="sdObservacoes" rows="4" style="width:100%; font-family:'Inter',sans-serif; font-size:13.5px; padding:8px 10px; border:1px solid var(--border); border-radius:5px; resize:vertical;" placeholder="Digite aqui observações gerais sobre a partida..." ${adminDisabled()}>${escPdf(sumula.observacoes)}</textarea>
+    <textarea class="sdObservacoes" rows="4" style="width:100%; font-family:'Inter',sans-serif; font-size:13.5px; padding:8px 10px; border:1px solid var(--border); border-radius:5px; resize:vertical;" placeholder="Digite aqui observações gerais sobre a partida..." ${adminDisabled()}>${escPdf(sumula.observacoes)}</textarea>
   </div>
 
   <div class="card">
-    <h2>Exportar</h2>
+    <h2 style="font-size:15px;">Exportar Súmula</h2>
     <p class="hint">Gera um PDF desta súmula com placar, resumo dos lançamentos, registro cronológico, observações gerais e linhas para assinatura da arbitragem, coordenação NAC e capitães. Use a opção "Salvar como PDF" na janela de impressão do navegador.</p>
-    <button class="btn" id="btnGerarSumulaPdf">🖨️ Gerar Súmula PDF</button>
+    <button class="btn btnGerarSumulaPdf">🖨️ Gerar Súmula PDF</button>
   </div>`;
+}
 
-  document.getElementById('main').innerHTML = html;
+/* Liga os eventos do painel acima (score/W.O./Jogo Limpo/data/hora/local, lançamentos
+   por inscrito, variáveis por modalidade, observações, exportar PDF) — tudo escopado
+   dentro de `panelEl` (o container deste jogo específico), nunca em document inteiro,
+   já que vários jogos da lista podem existir na página ao mesmo tempo (só um fica
+   expandido por vez, mas essa é a forma correta de evitar conflito entre eles). */
+function wireGameDetailPanelEvents(gameId, panelEl){
+  const game = STATE.games.find(g=>g.id===gameId);
+  if(!game || !panelEl) return;
+  const sumula = getSumula(game.id);
 
-  document.getElementById('voltarSumulas').addEventListener('click', ()=>{ activeSumulaGameId=null; renderSumulas(); });
-  document.getElementById('btnGerarSumulaPdf').addEventListener('click', ()=> gerarSumulaPdf(game.id));
-  const sdObsEl = document.getElementById('sdObservacoes');
-  if(sdObsEl) sdObsEl.addEventListener('input', ()=>{ sumula.observacoes = sdObsEl.value; markDirty(); });
+  const rerender = ()=>{
+    const stillExpanded = expandedGameId===gameId;
+    if(stillExpanded) panelEl.innerHTML = buildGameDetailHtml(gameId);
+    if(stillExpanded) wireGameDetailPanelEvents(gameId, panelEl);
+    renderGameSummaryRow(gameId);
+  };
 
-  const sdScoreAEl = document.querySelector('.sdScoreA'), sdScoreBEl = document.querySelector('.sdScoreB');
-  const sdWoEl = document.querySelector('.sdWoSelect'), sdFpAEl = document.querySelector('.sdFpA'), sdFpBEl = document.querySelector('.sdFpB');
-  const sdDataEl = document.querySelector('.sdDataInput'), sdHoraEl = document.querySelector('.sdHoraInput'), sdLocalEl = document.querySelector('.sdLocalInput');
-  if(sdScoreAEl) sdScoreAEl.addEventListener('input', ()=>{ game.scoreA = sdScoreAEl.value===''?null:Number(sdScoreAEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
-  if(sdScoreBEl) sdScoreBEl.addEventListener('input', ()=>{ game.scoreB = sdScoreBEl.value===''?null:Number(sdScoreBEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
-  if(sdWoEl) sdWoEl.addEventListener('change', ()=>{ game.wo = sdWoEl.value || null; if(game.wo){ game.scoreA=null; game.scoreB=null; } markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderSumulaDetail(gameId); });
-  if(sdFpAEl) sdFpAEl.addEventListener('change', ()=>{ game.fpA = sdFpAEl.value || null; markDirty(); syncMarcarSujoGame(gameId); });
-  if(sdFpBEl) sdFpBEl.addEventListener('change', ()=>{ game.fpB = sdFpBEl.value || null; markDirty(); syncMarcarSujoGame(gameId); });
+  const sdScoreAEl = panelEl.querySelector('.sdScoreA'), sdScoreBEl = panelEl.querySelector('.sdScoreB');
+  const sdWoEl = panelEl.querySelector('.sdWoSelect'), sdFpAEl = panelEl.querySelector('.sdFpA'), sdFpBEl = panelEl.querySelector('.sdFpB');
+  const sdDataEl = panelEl.querySelector('.sdDataInput'), sdHoraEl = panelEl.querySelector('.sdHoraInput'), sdLocalEl = panelEl.querySelector('.sdLocalInput');
+  if(sdScoreAEl) sdScoreAEl.addEventListener('input', ()=>{ game.scoreA = sdScoreAEl.value===''?null:Number(sdScoreAEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
+  if(sdScoreBEl) sdScoreBEl.addEventListener('input', ()=>{ game.scoreB = sdScoreBEl.value===''?null:Number(sdScoreBEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
+  if(sdWoEl) sdWoEl.addEventListener('change', ()=>{ game.wo = sdWoEl.value || null; if(game.wo){ game.scoreA=null; game.scoreB=null; } markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); rerender(); });
+  if(sdFpAEl) sdFpAEl.addEventListener('change', ()=>{ game.fpA = sdFpAEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
+  if(sdFpBEl) sdFpBEl.addEventListener('change', ()=>{ game.fpB = sdFpBEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
   if(sdDataEl) sdDataEl.addEventListener('change', ()=>{ game.data = sdDataEl.value; markDirty(); syncMarcarSujoGame(gameId); });
   if(sdHoraEl) sdHoraEl.addEventListener('change', ()=>{ game.hora = sdHoraEl.value; markDirty(); syncMarcarSujoGame(gameId); });
   if(sdLocalEl) sdLocalEl.addEventListener('input', ()=>{ game.local = sdLocalEl.value; markDirty(); syncMarcarSujoGame(gameId); });
 
-  document.querySelectorAll('.lancamentoBtn').forEach(btn=>{
+  const pdfBtn = panelEl.querySelector('.btnGerarSumulaPdf');
+  if(pdfBtn) pdfBtn.addEventListener('click', ()=> gerarSumulaPdf(game.id));
+
+  const obsEl = panelEl.querySelector('.sdObservacoes');
+  if(obsEl) obsEl.addEventListener('input', ()=>{ sumula.observacoes = obsEl.value; markDirty(); });
+
+  panelEl.querySelectorAll('.lancamentoBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       if(!isAdmin) return;
       const card = btn.closest('[data-inscrito]');
@@ -6434,11 +6392,11 @@ function renderSumulaDetail(gameId){
       sumula.eventos.push(evento);
       recomputarPlacarSumula(game);
       markDirty();
-      if(evento) syncEnviarLote([{id:`sumula_evento:${evento.id}`, tabela:'sumula_evento', registro_id:String(evento.id), dados:{...evento, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
-      renderScoreboard(); renderSumulaDetail(gameId);
+      syncEnviarLote([{id:`sumula_evento:${evento.id}`, tabela:'sumula_evento', registro_id:String(evento.id), dados:{...evento, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
+      renderScoreboard(); rerender();
     });
   });
-  document.querySelectorAll('.removeEvento').forEach(btn=>{
+  panelEl.querySelectorAll('.removeEvento').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const evId = Number(btn.closest('tr').dataset.evid);
       const eventoRemovido = sumula.eventos.find(e=>e.id===evId);
@@ -6446,12 +6404,13 @@ function renderSumulaDetail(gameId){
       recomputarPlacarSumula(game);
       markDirty();
       if(eventoRemovido) syncEnviarDelecaoImediata('sumula_evento', evId, {...eventoRemovido, gameId});
-      renderScoreboard(); renderSumulaDetail(gameId);
+      renderScoreboard(); rerender();
     });
   });
-  const stAddBtn = document.getElementById('stAdd');
+  const stAddBtn = panelEl.querySelector('.stAdd');
   if(stAddBtn) stAddBtn.addEventListener('click', ()=>{
-    const nome = document.getElementById('stNome').value.trim();
+    const nomeEl = panelEl.querySelector('.stNome');
+    const nome = nomeEl.value.trim();
     if(!nome){ alert('Informe o nome da variável.'); return; }
     let key = nome.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
     if(!key) key = 'var_'+Date.now();
@@ -6459,10 +6418,10 @@ function renderSumulaDetail(gameId){
       STATE.sumulaTipos[game.modalidade] = STATE.sumulaTipos._default.slice();
     }
     if(STATE.sumulaTipos[game.modalidade].some(t=>t.key===key)){ alert('Já existe uma variável com esse nome nesta modalidade.'); return; }
-    const contaPlacar = document.getElementById('stContaPlacar').checked;
-    const valor = Math.max(1, Number(document.getElementById('stValor').value)||1);
+    const contaPlacar = panelEl.querySelector('.stContaPlacar').checked;
+    const valor = Math.max(1, Number(panelEl.querySelector('.stValor').value)||1);
     STATE.sumulaTipos[game.modalidade].push({key, label:nome, contaPlacar, valor, removivel:true});
-    markDirty(); renderSumulaDetail(gameId);
+    markDirty(); rerender();
   });
 }
 
@@ -7243,7 +7202,6 @@ function renderAll(){
   else if(activeTab==='gerador') renderGeradorTabela();
   else if(activeTab==='inscricoes') renderInscricoes();
   else if(activeTab==='alimentacao') renderAlimentacao();
-  else if(activeTab==='sumulas') renderSumulas();
   else if(activeTab==='edital') renderEdital();
   updateSaveStatus();
 }
