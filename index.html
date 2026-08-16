@@ -380,7 +380,7 @@
   <div class="modal-box" style="max-width:460px;">
     <button class="modal-close" id="closeQrScanModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">Escanear inscrito</h2>
-    <p class="hint">Aponte a webcam para o QR Code do inscrito — a leitura e o registro da alimentação acontecem automaticamente. Se não houver QR Code, digite o código (ou nome) manualmente abaixo.</p>
+    <p class="hint">Aponte a webcam para o QR Code do inscrito — o campo é preenchido automaticamente assim que a leitura funcionar. Se não houver QR Code, digite o código (ou nome) manualmente abaixo.</p>
     <div style="display:flex; justify-content:center; margin:10px 0;">
       <div style="width:220px; height:220px; border-radius:10px; overflow:hidden; background:var(--bg); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; position:relative;">
         <video id="qrScanVideo" style="display:none; width:100%; height:100%; object-fit:cover;" autoplay playsinline muted></video>
@@ -523,7 +523,10 @@
     <button class="modal-close" id="closeEditArtisticaModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">Editar Apresentação Artística</h2>
     <div class="field"><label class="f-label">Inscrito(a)</label>
-      <input type="text" id="editArtInscritoBusca" list="editArtInscritoDatalist" placeholder="Digite o nome ou o código..." autocomplete="off" style="width:100%;">
+      <div style="display:flex; gap:6px;">
+        <input type="text" id="editArtInscritoBusca" list="editArtInscritoDatalist" placeholder="Digite o nome ou o código..." autocomplete="off" style="flex:1;">
+        <button class="btn secondary small" type="button" id="editArtScanBtn" title="Escanear QR Code do crachá">📷</button>
+      </div>
       <datalist id="editArtInscritoDatalist"></datalist>
       <input type="hidden" id="editArtInscritoSel">
     </div>
@@ -4964,10 +4967,13 @@ function renderModalidadesArtisticasContentHtml(){
     <p class="hint">Cadastro das apresentações artísticas (música, teatro, dança, artes visuais, entre outras) que os inscritos pretendem realizar no evento.</p>
     <div class="row" style="align-items:flex-end;">
       <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Inscrito(a)</label>
-        <input type="text" id="artInscritoBusca" list="artInscritoDatalist" placeholder="Digite o nome ou o código..." autocomplete="off" ${adminDisabled()}>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="artInscritoBusca" list="artInscritoDatalist" placeholder="Digite o nome ou o código..." autocomplete="off" style="flex:1;" ${adminDisabled()}>
+          ${isAdmin?'<button class="btn secondary small" type="button" id="artScanBtn" title="Escanear QR Code do crachá">📷</button>':''}
+        </div>
         ${inscritoBuscavelDatalistHtml('artInscritoDatalist', inscritosOrdenados)}
         <input type="hidden" id="artInscritoSel">
-        <p class="hint" style="margin:4px 0 0; font-size:11px;">Digite parte do nome ou o código para localizar — ou role as sugestões.</p>
+        <p class="hint" style="margin:4px 0 0; font-size:11px;">Digite parte do nome ou o código para localizar, role as sugestões, ou escaneie o QR Code do crachá.</p>
       </div>
       <div class="field"><label class="f-label">Linguagem</label>
         <select id="artLinguagemSel" ${adminDisabled()}>${LINGUAGENS_ARTISTICAS.map(l=>`<option value="${l}">${l}</option>`).join('')}</select>
@@ -5087,6 +5093,10 @@ function bindModalidadesArtisticasEvents(){
   renderArtisticasBody();
 
   bindInscritoBuscavel('artInscritoBusca', 'artInscritoSel', inscritosOrdenadosPorNome);
+  const artScanBtn = document.getElementById('artScanBtn');
+  if(artScanBtn) artScanBtn.addEventListener('click', ()=>{
+    openQrScanModal(texto => resolverInscritoBuscavelComValor(texto, 'artInscritoBusca', 'artInscritoSel'));
+  });
 
   const linguagemSel = document.getElementById('artLinguagemSel');
   const outraWrap = document.getElementById('artLinguagemOutraWrap');
@@ -5706,6 +5716,26 @@ function findInscritoPorCodigoOuNome(valorDigitado){
   return {status:'notfound'};
 }
 
+/* Resolve um valor digitado/escaneado (nome ou código) para dentro de um par de campos
+   "buscável" (busca em texto + hidden com o ID) — usado pelo botão "📷 Escanear QR Code"
+   em qualquer formulário que localize um inscrito por nome/código (ver
+   bindInscritoBuscavel). Mesma lógica de correspondência da Alimentação
+   (findInscritoPorCodigoOuNome), só que preenche um formulário em vez de registrar uma
+   refeição. Retorna true (achou e preencheu) ou false (mostra o motivo em alert e deixa
+   o modal do scanner aberto para tentar de novo). */
+function resolverInscritoBuscavelComValor(valorDigitado, inputId, hiddenId){
+  const result = findInscritoPorCodigoOuNome(valorDigitado);
+  if(result.status==='empty'){ alert('Digite ou escaneie o nome ou o código do inscrito.'); return false; }
+  if(result.status==='notfound'){ alert('Inscrito não encontrado. Confira o nome ou o código.'); return false; }
+  if(result.status==='ambiguous'){
+    alert('Mais de um inscrito encontrado com esse nome. Use o código do inscrito para identificar com precisão:\n\n' +
+      result.matches.map(a=>`${a.nome} — ${teamLabel(a.teamId)} — código: ${a.codigo}`).join('\n'));
+    return false;
+  }
+  setInscritoBuscavel(inputId, hiddenId, result.inscrito.id);
+  return true;
+}
+
 function pratosParaEvitar(inscrito, dataRegistro){
   if(!inscrito.restricaoAlimentar || !inscrito.restricoesAlimentares) return [];
   const restricoes = inscrito.restricoesAlimentares.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
@@ -5784,9 +5814,17 @@ function registrarAlimentacao(){
 let qrScanStream = null;
 let qrScanRAF = null;
 let qrScanBusy = false;
+/* Função chamada com o texto lido (webcam) ou digitado manualmente — recebe o valor e
+   deve devolver true (achou/usou com sucesso, fecha o modal) ou false (mantém aberto,
+   mostra o texto no campo manual para o usuário corrigir). Definida a cada abertura do
+   modal (ver openQrScanModal), assim o mesmo modal serve tanto para "registrar
+   alimentação" quanto para "preencher o campo Inscrito(a)" em qualquer outro formulário
+   que precise localizar alguém por nome/código — ver resolverInscritoBuscavelComValor. */
+let qrScanOnValue = null;
 
-function openQrScanModal(){
+function openQrScanModal(onValue){
   if(!isAdmin) return;
+  qrScanOnValue = onValue || (texto => registrarAlimentacaoComValor(texto, null));
   document.getElementById('qrScanManualInput').value = '';
   const statusEl = document.getElementById('qrScanStatus');
   statusEl.style.display = 'none';
@@ -5861,7 +5899,7 @@ function tickQrScan(){
     qrScanBusy = true;
     const texto = code.data.trim();
     stopQrScan();
-    const ok = registrarAlimentacaoComValor(texto, null);
+    const ok = qrScanOnValue(texto);
     if(ok){
       closeQrScanModal();
     } else {
@@ -5966,7 +6004,7 @@ function renderAlimentacao(){
     document.getElementById('feedLookup').addEventListener('keydown', (e)=>{ if(e.key==='Enter') registrarAlimentacao(); });
   }
   const feedScanBtn = document.getElementById('feedScanBtn');
-  if(feedScanBtn) feedScanBtn.addEventListener('click', openQrScanModal);
+  if(feedScanBtn) feedScanBtn.addEventListener('click', ()=> openQrScanModal());
 
   renderCardapioBody();
   renderCheckinsBody();
@@ -7348,12 +7386,12 @@ function renderViewOnlyBanner(){
   document.getElementById('cancelQrScanBtn').addEventListener('click', closeQrScanModal);
   document.getElementById('qrScanModal').addEventListener('click', (e)=>{ if(e.target.id==='qrScanModal') closeQrScanModal(); });
   document.getElementById('qrScanManualBtn').addEventListener('click', ()=>{
-    const ok = registrarAlimentacaoComValor(document.getElementById('qrScanManualInput').value, 'qrScanManualInput');
+    const ok = qrScanOnValue(document.getElementById('qrScanManualInput').value);
     if(ok) closeQrScanModal();
   });
   document.getElementById('qrScanManualInput').addEventListener('keydown', (e)=>{
     if(e.key==='Enter'){
-      const ok = registrarAlimentacaoComValor(document.getElementById('qrScanManualInput').value, 'qrScanManualInput');
+      const ok = qrScanOnValue(document.getElementById('qrScanManualInput').value);
       if(ok) closeQrScanModal();
     }
   });
@@ -7399,6 +7437,9 @@ function renderViewOnlyBanner(){
   document.getElementById('editArtisticaModal').addEventListener('click', (e)=>{ if(e.target.id==='editArtisticaModal') closeEditArtisticaModal(); });
   document.getElementById('editArtLinguagemSel').addEventListener('change', (e)=>{ document.getElementById('editArtLinguagemOutraWrap').style.display = e.target.value==='Outra' ? 'flex' : 'none'; });
   bindInscritoBuscavel('editArtInscritoBusca', 'editArtInscritoSel', inscritosOrdenadosPorNome);
+  document.getElementById('editArtScanBtn').addEventListener('click', ()=>{
+    openQrScanModal(texto => resolverInscritoBuscavelComValor(texto, 'editArtInscritoBusca', 'editArtInscritoSel'));
+  });
   document.getElementById('closeImportReviewModal').addEventListener('click', closeImportReviewModal);
   document.getElementById('cancelImportReviewBtn').addEventListener('click', closeImportReviewModal);
   document.getElementById('confirmImportReviewBtn').addEventListener('click', confirmImportReview);
