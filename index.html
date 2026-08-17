@@ -29,12 +29,21 @@
 
   .brand{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;}
   .brand-title{display:flex; flex-direction:column;}
-  .brand-title .eyebrow{font-family:'Space Mono',monospace; font-size:11px; color:var(--gold); letter-spacing:0.15em;}
-  .title-row{display:flex; align-items:center; gap:8px;}
+  .brand-title .eyebrow{font-family:'Space Mono',monospace; font-size:12px; color:var(--gold); letter-spacing:0.08em; white-space:nowrap;}
+  .title-row{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
   .brand-title h1{margin:2px 0 0; font-size:28px; color:#fff;}
   .edit-title-btn{background:none; border:1px solid #3A4E77; color:#B9C4DA; border-radius:5px; cursor:pointer; font-size:12px; padding:4px 8px; margin-top:4px;}
   .edit-title-btn:hover{color:#fff; border-color:#fff;}
-  .brand-sub{font-size:12.5px; color:#B9C4DA; max-width:420px;}
+  .info-icon{background:none; border:none; cursor:pointer; font-size:14px; opacity:0.75; padding:0; line-height:1; align-self:center;}
+  .info-icon:hover{opacity:1;}
+  .subtitle-popover{max-width:460px; font-size:12.5px; color:#B9C4DA; background:var(--navy-light); border:1px solid #3A4E77; border-radius:6px; padding:10px 12px; margin-top:8px;}
+
+  .dropdown-wrap{position:relative; display:inline-block;}
+  .dropdown-menu{display:none; position:absolute; right:0; top:calc(100% + 6px); background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.18); padding:6px; min-width:200px; z-index:50; flex-direction:column; gap:2px;}
+  .dropdown-menu.open{display:flex;}
+  .dropdown-menu button{width:100%; text-align:left; background:none; border:none; padding:8px 10px; border-radius:5px; cursor:pointer; font-size:13px; color:var(--navy); font-family:'Inter',sans-serif;}
+  .dropdown-menu button:hover{background:var(--bg);}
+  .dropdown-divider{height:1px; background:var(--border); margin:4px 2px;}
 
   .scoreboard{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:16px 0 0;}
   @media(max-width:900px){.scoreboard{grid-template-columns:repeat(2,1fr);}}
@@ -170,29 +179,36 @@
   <div class="topbar-inner">
     <div class="toolbar">
       <span class="save-status" id="saveStatus">Carregando…</span>
-      <button id="btnPainelPopup">📊 Painel Geral</button>
-      <button id="btnExport">⬇️ Exportar backup</button>
-      <button id="btnImport">⬆️ Importar backup</button>
-      <input type="file" id="importFile" accept="application/json" style="display:none;">
       <button class="primary" id="btnSave">💾 Salvar</button>
       <button id="btnAdmin">🔒 Login Administrador</button>
-      <button id="btnChangePassword" style="display:none;">🔑 Alterar senha</button>
-      <button id="btnEditHeader" style="display:none;">🖼️ Editar cabeçalho</button>
-      <button id="btnOrganizarAbas" style="display:none;">🗂️ Organizar abas</button>
-      <button id="btnClearData" style="display:none;">🧹 Limpar dados</button>
+      <div class="dropdown-wrap" id="moreOptionsWrap">
+        <button id="btnMoreOptions">⋯ Mais opções</button>
+        <div class="dropdown-menu" id="moreOptionsMenu">
+          <button id="btnPainelPopup">📊 Painel Geral</button>
+          <button id="btnExport">⬇️ Exportar backup</button>
+          <button id="btnImport">⬆️ Importar backup</button>
+          <input type="file" id="importFile" accept="application/json" style="display:none;">
+          <div class="dropdown-divider" id="adminOnlyDivider" style="display:none;"></div>
+          <button id="btnChangePassword" style="display:none;">🔑 Alterar senha</button>
+          <button id="btnEditHeader" style="display:none;">🖼️ Editar cabeçalho</button>
+          <button id="btnOrganizarAbas" style="display:none;">🗂️ Organizar abas</button>
+          <button id="btnClearData" style="display:none;">🧹 Limpar dados</button>
+        </div>
+      </div>
     </div>
     <div class="brand">
       <div style="display:flex; align-items:center; gap:14px;">
         <img id="headerLogo" style="display:none; height:52px; max-width:120px; object-fit:contain; border-radius:6px; background:#fff; padding:4px;">
         <div class="brand-title">
-          <span class="eyebrow" id="eyebrowText">Colégio Marista São José — Montes Claros</span>
           <div class="title-row">
             <h1 id="eventTitle">44º JIM - 2026</h1>
+            <span class="eyebrow" id="eyebrowText">Colégio Marista São José — Montes Claros</span>
+            <button id="subtitleInfoBtn" class="info-icon" style="display:none;" title="Sobre este painel">ℹ️</button>
           </div>
         </div>
       </div>
-      <div class="brand-sub" id="subtitleText">Painel de jogos, pontuação, jogo limpo, modalidades individuais e classificação geral — conforme o Regulamento dos Jogos Internos Marista.</div>
     </div>
+    <div class="subtitle-popover" id="subtitlePopover" style="display:none;"></div>
     <div id="scoreboard" class="scoreboard"></div>
     <div class="tabs" id="tabs"></div>
   </div>
@@ -2887,8 +2903,13 @@ function renderHeaderBlock(){
   if(eventTitleEl) eventTitleEl.textContent = STATE.eventName;
   const eyebrowEl = document.getElementById('eyebrowText');
   if(eyebrowEl) eyebrowEl.textContent = STATE.header.eyebrow;
-  const subtitleEl = document.getElementById('subtitleText');
-  if(subtitleEl) subtitleEl.textContent = STATE.header.subtitle;
+  // O texto descritivo (subtitle) não fica mais sempre visível no cabeçalho — vira um
+  // ícone "ℹ️" ao lado do título, que só aparece se houver algo preenchido, e mostra o
+  // texto num pequeno popover ao clicar (ver toggleSubtitlePopover, mais abaixo).
+  const infoBtn = document.getElementById('subtitleInfoBtn');
+  if(infoBtn) infoBtn.style.display = STATE.header.subtitle ? 'inline-block' : 'none';
+  const popover = document.getElementById('subtitlePopover');
+  if(popover && popover.style.display!=='none') popover.textContent = STATE.header.subtitle;
   const logoEl = document.getElementById('headerLogo');
   if(logoEl){
     const logoUrl = imgGet(STATE.header.logoDataUrl);
@@ -2916,6 +2937,29 @@ function renderHeaderBlock(){
   if(clearBtn) clearBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const pwBtn = document.getElementById('btnChangePassword');
   if(pwBtn) pwBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  const adminDivider = document.getElementById('adminOnlyDivider');
+  if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
+}
+
+/* Ícone "ℹ️" ao lado do título: alterna um pequeno popover com o texto descritivo do
+   cabeçalho (STATE.header.subtitle) — antes ficava sempre visível abaixo do título,
+   ocupando espaço em toda tela mesmo sendo um texto estático que raramente muda. */
+function toggleSubtitlePopover(){
+  const popover = document.getElementById('subtitlePopover');
+  if(!popover) return;
+  const abrir = popover.style.display==='none';
+  if(abrir){ popover.textContent = STATE.header.subtitle; popover.style.display='block'; }
+  else popover.style.display='none';
+}
+
+/* Menu "⋯ Mais opções": agrupa as ações usadas com menos frequência (antes eram até 8
+   botões soltos lado a lado no cabeçalho). Fecha sozinho ao clicar em qualquer opção
+   dele, ou fora do menu. */
+function toggleMoreOptionsMenu(forcarFechado){
+  const menu = document.getElementById('moreOptionsMenu');
+  if(!menu) return;
+  if(forcarFechado){ menu.classList.remove('open'); return; }
+  menu.classList.toggle('open');
 }
 
 /* ===================== HEADER EDIT MODAL ===================== */
@@ -3005,6 +3049,10 @@ function saveHeaderModal(){
 /* ===================== SCOREBOARD ===================== */
 function renderScoreboard(){
   const el = document.getElementById('scoreboard');
+  // Repetido em toda aba não ajudava muito -- só faz sentido em destaque na aba Painel,
+  // onde já existe a classificação completa logo abaixo, com mais detalhe.
+  el.style.display = activeTab==='painel' ? '' : 'none';
+  if(activeTab!=='painel') return;
   const rows = computeStandings().slice(0,3);
   const labels = ['1º LUGAR GERAL','2º LUGAR GERAL','3º LUGAR GERAL'];
   el.innerHTML = rows.map((r,i)=>{
@@ -7412,6 +7460,18 @@ function renderViewOnlyBanner(){
   document.getElementById('closePainelModal2').addEventListener('click', closePainelModal);
   document.getElementById('painelModal').addEventListener('click', (e)=>{ if(e.target.id==='painelModal') closePainelModal(); });
   document.getElementById('btnAdmin').addEventListener('click', ()=>{ isAdmin ? doLogout() : openLoginModal(); });
+  document.getElementById('subtitleInfoBtn').addEventListener('click', (e)=>{ e.stopPropagation(); toggleSubtitlePopover(); });
+  document.getElementById('btnMoreOptions').addEventListener('click', (e)=>{ e.stopPropagation(); toggleMoreOptionsMenu(); });
+  document.getElementById('moreOptionsMenu').addEventListener('click', (e)=>{
+    if(e.target.tagName==='BUTTON') toggleMoreOptionsMenu(true); // fecha o menu ao escolher qualquer opção
+  });
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('#moreOptionsWrap')) toggleMoreOptionsMenu(true);
+    if(!e.target.closest('#subtitleInfoBtn') && !e.target.closest('#subtitlePopover')){
+      const popover = document.getElementById('subtitlePopover');
+      if(popover) popover.style.display = 'none';
+    }
+  });
   document.getElementById('closeLoginModal').addEventListener('click', closeLoginModal);
   document.getElementById('cancelLoginBtn').addEventListener('click', closeLoginModal);
   document.getElementById('confirmLoginBtn').addEventListener('click', attemptLogin);
