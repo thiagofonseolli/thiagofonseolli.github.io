@@ -5262,6 +5262,9 @@ function zipStore(files){
 }
 /* rows: array de arrays de string (linha 1 = cabeçalho). Sem estilos — o Excel/LibreOffice/
    Google Sheets aplicam a aparência padrão normalmente. */
+/* rows: array de arrays de string (linha 1 = cabeçalho). Sem estilos — usada em contextos
+   simples (ex.: exportações internas). O modelo de importação (mais abaixo) usa
+   buildStyledXlsx() para ficar com a mesma identidade visual do app. */
 function buildSimpleXlsx(sheetName, rows){
   let sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
   rows.forEach((row, rIdx)=>{
@@ -5290,6 +5293,99 @@ function buildSimpleXlsx(sheetName, rows){
   ]);
 }
 
+/* Igual ao buildSimpleXlsx acima, mas com um styles.xml de verdade — título em destaque,
+   linha de instruções em itálico cinza, cabeçalho com fundo azul-marinho e texto branco
+   em negrito (as mesmas cores --navy/--border do app), bordas nas células de dado,
+   colunas com largura ajustada e o cabeçalho fixo ao rolar (freeze pane). Usa `s="N"` nas
+   células para referenciar um estilo do cellXfs — o leitor do app ignora esse atributo
+   normalmente, então continua lendo os valores de texto sem problema (testado).
+   `sections`: array de {tipo:'titulo'|'instrucoes'|'blank'|'header'|'data', cells:[...]}. */
+function buildStyledXlsx(sheetName, sections, colWidths){
+  const numCols = colWidths.length;
+  let sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  sheetXml += `<cols>${colWidths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
+
+  let headerRowNum = null;
+  sections.forEach((sec, i)=>{ if(sec.tipo==='header') headerRowNum = i+1; });
+  sheetXml += `<sheetViews><sheetView workbookViewId="0">`;
+  if(headerRowNum) sheetXml += `<pane ySplit="${headerRowNum}" topLeftCell="A${headerRowNum+1}" activePane="bottomLeft" state="frozen"/>`;
+  sheetXml += `</sheetView></sheetViews>`;
+
+  sheetXml += '<sheetData>';
+  const styleMap = {titulo:1, instrucoes:2, header:3, data:4, blank:0};
+  sections.forEach((sec, idx)=>{
+    const r = idx+1;
+    const s = styleMap[sec.tipo] ?? 0;
+    sheetXml += sec.tipo==='header' ? `<row r="${r}" customHeight="1" ht="20">` : `<row r="${r}">`;
+    (sec.cells||[]).forEach((val, cIdx)=>{
+      const ref = xlsxColRowToRef(cIdx+1, r);
+      if(val===null || val===undefined || val===''){
+        if(s>0) sheetXml += `<c r="${ref}" s="${s}"/>`;
+        return;
+      }
+      sheetXml += `<c r="${ref}" t="inlineStr" s="${s}"><is><t xml:space="preserve">${escPdf(val)}</t></is></c>`;
+    });
+    // preenche celulas vazias ate numCols para a cor/borda aparecer na linha toda
+    if(sec.tipo==='titulo' || sec.tipo==='instrucoes' || sec.tipo==='header'){
+      for(let c=(sec.cells||[]).length; c<numCols; c++) sheetXml += `<c r="${xlsxColRowToRef(c+1,r)}" s="${s}"/>`;
+    }
+    sheetXml += `</row>`;
+  });
+  sheetXml += '</sheetData>';
+
+  const merges = [];
+  sections.forEach((sec, idx)=>{
+    if(sec.tipo==='titulo' || sec.tipo==='instrucoes'){
+      const r = idx+1;
+      merges.push(`${xlsxColRowToRef(1,r)}:${xlsxColRowToRef(numCols,r)}`);
+    }
+  });
+  if(merges.length) sheetXml += `<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`;
+  sheetXml += '</worksheet>';
+
+  const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="4">' +
+      '<font><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="16"/><color rgb="FF12213F"/><name val="Calibri"/></font>' +
+      '<font><i/><sz val="10"/><color rgb="FF6B7280"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="3">' +
+      '<fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF12213F"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
+    '<borders count="2">' +
+      '<border><left/><right/><top/><bottom/><diagonal/></border>' +
+      '<border><left style="thin"><color rgb="FFE2E6ED"/></left><right style="thin"><color rgb="FFE2E6ED"/></right><top style="thin"><color rgb="FFE2E6ED"/></top><bottom style="thin"><color rgb="FFE2E6ED"/></bottom><diagonal/></border>' +
+    '</borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="5">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+      '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>' +
+    '</cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+
+  const contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+  const rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  const workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    `<sheets><sheet name="${escPdf(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+  const workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+  const enc = s => new TextEncoder().encode(s);
+  return zipStore([
+    {name:'[Content_Types].xml', bytes: enc(contentTypes)},
+    {name:'_rels/.rels', bytes: enc(rootRels)},
+    {name:'xl/workbook.xml', bytes: enc(workbookXml)},
+    {name:'xl/_rels/workbook.xml.rels', bytes: enc(workbookRels)},
+    {name:'xl/styles.xml', bytes: enc(stylesXml)},
+    {name:'xl/worksheets/sheet1.xml', bytes: enc(sheetXml)},
+  ]);
+}
+
 /* Monta o cabeçalho da ficha a partir da configuração REAL do torneio agora — Equipes e
    modalidades cadastradas — para que o modelo baixado nunca fique desatualizado. */
 function colunasImportacao(){
@@ -5304,13 +5400,14 @@ function gerarModeloImportacaoXlsx(){
   const cols = colunasImportacao();
   const header = [...cols.fixas, ...cols.mods.map(m=>m.label), ...cols.extras];
   const equipesRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
-  const rows = [
-    [equipesRef],
-    ['Preencha Genero com Masculino ou Feminino (pode deixar em branco se a equipe já for só de um gênero). Nas colunas de modalidade, escreva Sim ou Não.'],
-    [],
-    header,
+  const sections = [
+    {tipo:'titulo', cells:[`Ficha de Inscrição — ${STATE.eventName}`]},
+    {tipo:'instrucoes', cells:[`${equipesRef}. Preencha Genero com Masculino ou Feminino (pode deixar em branco se a equipe já for só de um gênero). Nas colunas de modalidade, escreva Sim ou Não.`]},
+    {tipo:'blank', cells:[]},
+    {tipo:'header', cells:header},
   ];
-  const bytes = buildSimpleXlsx('Inscrições', rows);
+  const colWidths = [24, 14, 12, ...cols.mods.map(()=>10), 22, 26, 16, 20, 16, 20];
+  const bytes = buildStyledXlsx('Inscrições', sections, colWidths);
   const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
