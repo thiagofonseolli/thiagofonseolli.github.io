@@ -5302,14 +5302,20 @@ function buildSimpleXlsx(sheetName, rows){
    `sections`: array de {tipo:'titulo'|'instrucoes'|'blank'|'header'|'data', cells:[...]}. */
 function buildStyledXlsx(sheetName, sections, colWidths){
   const numCols = colWidths.length;
+  const numRows = sections.length;
   let sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
-  sheetXml += `<cols>${colWidths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
+  // A ordem dos elementos aqui dentro segue o schema do OOXML à risca — o Excel de
+  // verdade é rigoroso quanto a isso (bibliotecas de leitura mais tolerantes, como
+  // openpyxl, não se importam, o que mascarou esse bug até testar no Excel de verdade):
+  // dimension, depois sheetViews, depois cols, depois sheetData, depois mergeCells.
+  sheetXml += `<dimension ref="A1:${xlsxColRowToRef(numCols, numRows)}"/>`;
 
   let headerRowNum = null;
   sections.forEach((sec, i)=>{ if(sec.tipo==='header') headerRowNum = i+1; });
   sheetXml += `<sheetViews><sheetView workbookViewId="0">`;
   if(headerRowNum) sheetXml += `<pane ySplit="${headerRowNum}" topLeftCell="A${headerRowNum+1}" activePane="bottomLeft" state="frozen"/>`;
   sheetXml += `</sheetView></sheetViews>`;
+  sheetXml += `<cols>${colWidths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>`;
 
   sheetXml += '<sheetData>';
   const styleMap = {titulo:1, instrucoes:2, header:3, data:4, blank:0};
