@@ -3047,20 +3047,14 @@ function saveHeaderModal(){
 }
 
 /* ===================== SCOREBOARD ===================== */
+/* O pódio (1º/2º/3º lugar) foi removido de vez — a mesma informação já existe, com mais
+   detalhe, na tabela "Classificação Geral" da própria aba Painel. A função continua
+   existindo (só oculta o elemento) porque é chamada em bastante lugar do código toda vez
+   que um placar/ajuste muda, como um "atualiza esse resumo pequeno" barato — mais seguro
+   manter a função do que caçar e remover todas essas chamadas. */
 function renderScoreboard(){
   const el = document.getElementById('scoreboard');
-  // Repetido em toda aba não ajudava muito -- só faz sentido em destaque na aba Painel,
-  // onde já existe a classificação completa logo abaixo, com mais detalhe.
-  el.style.display = activeTab==='painel' ? '' : 'none';
-  if(activeTab!=='painel') return;
-  const rows = computeStandings().slice(0,3);
-  const labels = ['1º LUGAR GERAL','2º LUGAR GERAL','3º LUGAR GERAL'];
-  el.innerHTML = rows.map((r,i)=>{
-    const team = r.total>0 ? r.team.label : '—';
-    const dot = r.total>0 ? `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${teamColor(r.team.id,null)};margin-right:7px;vertical-align:middle;box-shadow:0 0 6px rgba(255,255,255,0.25);"></span>` : '';
-    return `<div class="sb-cell"><div class="sb-label">${labels[i]}</div>
-      <div class="sb-team mono">${dot}${team}</div><div class="sb-pts mono">${r.total} PTS</div></div>`;
-  }).join('') || `<div class="sb-cell"><div class="sb-label">CLASSIFICAÇÃO GERAL</div><div class="sb-team mono">—</div><div class="sb-pts mono">0 PTS</div></div>`;
+  if(el) el.style.display = 'none';
 }
 
 /* ===================== TABS ===================== */
