@@ -3108,7 +3108,7 @@ function orderedTabs(){
   const byId = {}; TABS.forEach(t=> byId[t.id]=t);
   const ordered = (STATE.tabOrder||[]).map(id=> byId[id]).filter(Boolean);
   TABS.forEach(t=>{ if(!ordered.includes(t)) ordered.push(t); });
-  if(!isAdmin) return ordered.filter(t=> t.id==='painel');
+  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='edital');
   return ordered;
 }
 
@@ -7435,7 +7435,7 @@ function importBackup(file){
 
 /* ===================== MAIN RENDER ===================== */
 function renderAll(){
-  if(!isAdmin) activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
+  if(!isAdmin && activeTab!=='painel' && activeTab!=='edital') activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
   renderTabs();
   renderScoreboard();
   renderHeaderBlock();
