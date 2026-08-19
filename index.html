@@ -5334,8 +5334,6 @@ function zipStore(files){
   out.set(eocdBytes, p);
   return out;
 }
-/* rows: array de arrays de string (linha 1 = cabeçalho). Sem estilos — o Excel/LibreOffice/
-   Google Sheets aplicam a aparência padrão normalmente. */
 /* rows: array de arrays de string (linha 1 = cabeçalho). Sem estilos — usada em contextos
    simples (ex.: exportações internas). O modelo de importação (mais abaixo) usa
    buildStyledXlsx() para ficar com a mesma identidade visual do app. */
@@ -5374,7 +5372,7 @@ function buildSimpleXlsx(sheetName, rows){
    células para referenciar um estilo do cellXfs — o leitor do app ignora esse atributo
    normalmente, então continua lendo os valores de texto sem problema (testado).
    `sections`: array de {tipo:'titulo'|'instrucoes'|'blank'|'header'|'data', cells:[...]}. */
-function buildStyledXlsx(sheetName, sections, colWidths){
+function buildStyledXlsx(sheetName, sections, colWidths, dataValidations){
   const numCols = colWidths.length;
   const numRows = sections.length;
   let sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
@@ -5421,6 +5419,24 @@ function buildStyledXlsx(sheetName, sections, colWidths){
     }
   });
   if(merges.length) sheetXml += `<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`;
+
+  /* Validação de dados (o "menu suspenso" do próprio Excel/LibreOffice/Sheets) — em vez
+     de digitar, quem preenche clica na célula e escolhe entre as opções da lista.
+     dataValidations: array de {col, options} (col = número da coluna, 1-based). Aplicada
+     da primeira linha de dado até a linha 500 (mais que suficiente para uma ficha de
+     inscrição escolar). Precisa ficar DEPOIS de mergeCells na ordem do XML (o Excel
+     valida essa ordem à risca — ver nota no início desta função). */
+  if(dataValidations && dataValidations.length){
+    const startRow = (headerRowNum||0) + 1;
+    const endRow = 500;
+    sheetXml += `<dataValidations count="${dataValidations.length}">` + dataValidations.map(dv=>{
+      const colLetra = xlsxColRowToRef(dv.col, 1).replace(/\d+$/, '');
+      const range = `${colLetra}${startRow}:${colLetra}${endRow}`;
+      const formula = dv.options.join(',');
+      return `<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" errorTitle="Valor inválido" error="Escolha uma opção da lista." sqref="${range}"><formula1>"${escPdf(formula)}"</formula1></dataValidation>`;
+    }).join('') + `</dataValidations>`;
+  }
+
   sheetXml += '</worksheet>';
 
   const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
@@ -5482,12 +5498,27 @@ function gerarModeloImportacaoXlsx(){
   const equipesRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
   const sections = [
     {tipo:'titulo', cells:[`Ficha de Inscrição — ${STATE.eventName}`]},
-    {tipo:'instrucoes', cells:[`${equipesRef}. Preencha Genero com Masculino ou Feminino (pode deixar em branco se a equipe já for só de um gênero). Nas colunas de modalidade, escreva Sim ou Não.`]},
+    {tipo:'instrucoes', cells:[`${equipesRef}. Genero, modalidades, Restrição Alimentar e Alergia a Medicamento têm uma lista pra escolher — clique na célula e selecione. Deixe Genero em branco se a equipe já for só de um gênero.`]},
     {tipo:'blank', cells:[]},
     {tipo:'header', cells:header},
   ];
   const colWidths = [24, 14, 12, ...cols.mods.map(()=>10), 22, 26, 16, 20, 16, 20];
-  const bytes = buildStyledXlsx('Inscrições', sections, colWidths);
+
+  /* Validação de dados (menu suspenso) para os campos com poucas opções fixas — Genero
+     (Masculino/Feminino) e todo campo Sim/Não (cada modalidade, Restrição Alimentar,
+     Alergia a Medicamento). Nome, Equipe, Sinopse etc. continuam texto livre, já que têm
+     muitas respostas possíveis pra caber numa lista fixa. */
+  const extrasStart = cols.fixas.length + cols.mods.length;
+  const restrCol = extrasStart + cols.extras.indexOf('Restrição Alimentar') + 1;
+  const alergCol = extrasStart + cols.extras.indexOf('Alergia a Medicamento') + 1;
+  const dataValidations = [
+    {col: cols.fixas.indexOf('Genero') + 1, options: ['Masculino','Feminino']},
+    ...cols.mods.map((m,i)=> ({col: cols.fixas.length + i + 1, options: ['Sim','Não']})),
+    {col: restrCol, options: ['Sim','Não']},
+    {col: alergCol, options: ['Sim','Não']},
+  ];
+
+  const bytes = buildStyledXlsx('Inscrições', sections, colWidths, dataValidations);
   const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
