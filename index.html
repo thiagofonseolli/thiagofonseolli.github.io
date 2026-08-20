@@ -3203,10 +3203,27 @@ function renderJogos(){
       <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
     </div>
+  </div>
+  <div class="card">
+    <h2>Adicionar nova variável de súmula</h2>
+    <p class="hint">Crie um novo tipo de lançamento (ex.: "Substituição", "Advertência técnica") e escolha em quais modalidades ele deve valer. Ele passa a aparecer como botão para cada inscrito na escalação, dentro do painel de detalhes de qualquer jogo das modalidades marcadas.</p>
+    <div class="field" style="margin-bottom:10px;">
+      <label class="f-label">Aplicar em quais modalidades?</label>
+      <div class="pill-group">
+        ${STATE.modalidades.map(m=>`<label class="pill" style="display:inline-flex; align-items:center; gap:5px;"><input type="checkbox" class="stModCheck" value="${escPdf(m)}"> ${escPdf(m)}</label>`).join('')}
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
+      <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
+      <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
+      <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
+    </div>
   </div>` : ''}
   <div id="gamesList"></div>`;
 
   document.getElementById('main').innerHTML = html;
+  if(isAdmin) bindAdicionarVariavelSumula();
   ['fModalidade','fGenero','fStatus'].forEach(id=>{
     document.getElementById(id).addEventListener('change', (e)=>{
       if(id==='fModalidade') filtroModalidade=e.target.value;
@@ -3231,6 +3248,48 @@ function renderJogos(){
   }
 
   renderGamesList();
+}
+
+/* Liga o botão "+ Adicionar variável" do quadro "Adicionar nova variável de súmula" —
+   um quadro fixo na aba Jogos (junto de "Adicionar jogo manualmente"), não mais dentro
+   do painel de um jogo específico, já que a variável pode valer para várias modalidades
+   de uma vez e não depende de nenhum jogo estar aberto. */
+function bindAdicionarVariavelSumula(){
+  const stAddBtn = document.querySelector('.stAdd');
+  if(!stAddBtn) return;
+  stAddBtn.addEventListener('click', ()=>{
+    const nomeEl = document.querySelector('.stNome');
+    const nome = nomeEl.value.trim();
+    if(!nome){ showAlert('Informe o nome da variável.'); return; }
+    const modsMarcadas = Array.from(document.querySelectorAll('.stModCheck:checked')).map(el=>el.value);
+    if(modsMarcadas.length===0){ showAlert('Marque ao menos uma modalidade em "Aplicar em quais modalidades?".'); return; }
+    let key = normalizeSearchText(nome).replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+    if(!key) key = 'var_'+Date.now();
+    const contaPlacar = document.querySelector('.stContaPlacar').checked;
+    const valor = Math.max(1, Number(document.querySelector('.stValor').value)||1);
+    const adicionadas = [], jaExistentes = [];
+    modsMarcadas.forEach(mod=>{
+      if(!Array.isArray(STATE.sumulaTipos[mod])){
+        STATE.sumulaTipos[mod] = STATE.sumulaTipos._default.slice();
+      }
+      if(STATE.sumulaTipos[mod].some(t=>t.key===key)){ jaExistentes.push(mod); return; }
+      STATE.sumulaTipos[mod].push({key, label:nome, contaPlacar, valor, removivel:true});
+      adicionadas.push(mod);
+    });
+    markDirty();
+    nomeEl.value = '';
+    document.querySelector('.stContaPlacar').checked = false;
+    document.querySelector('.stValor').value = '1';
+    document.querySelectorAll('.stModCheck').forEach(el=> el.checked=false);
+    renderGamesList(); // atualiza o painel de qualquer jogo já expandido com a variável nova
+    if(adicionadas.length===0){
+      showAlert(`Já existe uma variável chamada "${nome}" em todas as modalidades marcadas (${jaExistentes.join(', ')}) — escolha outro nome, ou marque uma modalidade diferente.`);
+    } else {
+      let msg = `Variável "${nome}" adicionada em: ${adicionadas.join(', ')}.`;
+      if(jaExistentes.length) msg += `\n\nJá existia (não duplicada) em: ${jaExistentes.join(', ')}.`;
+      showAlert(msg);
+    }
+  });
 }
 
 function renderGamesList(){
@@ -6581,23 +6640,6 @@ function buildGameDetailHtml(gameId){
     <table><thead><tr><th>Ocorrência</th><th>${teamChip(game.teamA, game.genero)}</th><th>${teamChip(game.teamB, game.genero)}</th></tr></thead><tbody>${resumoHtml}</tbody></table>
   </div>
 
-  ${isAdmin ? `<div class="card">
-    <h2 style="font-size:15px;">Adicionar nova variável</h2>
-    <p class="hint">Crie um novo tipo de lançamento (ex.: "Substituição", "Advertência técnica") e escolha em quais modalidades ele deve valer — pode ser só nesta (${escPdf(game.modalidade)}) ou em várias de uma vez. Ele passa a aparecer como botão para cada inscrito na escalação, nos jogos das modalidades marcadas.</p>
-    <div class="field" style="margin-bottom:10px;">
-      <label class="f-label">Aplicar em quais modalidades?</label>
-      <div class="pill-group">
-        ${STATE.modalidades.map(m=>`<label class="pill" style="display:inline-flex; align-items:center; gap:5px;"><input type="checkbox" class="stModCheck" value="${escPdf(m)}" ${m===game.modalidade?'checked':''}> ${escPdf(m)}</label>`).join('')}
-      </div>
-    </div>
-    <div class="row">
-      <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
-      <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
-    </div>
-  </div>` : ''}
-
   <div class="row" style="gap:16px; align-items:flex-start;">
     <div style="flex:1; min-width:280px;">
       <div class="card"><h2 style="font-size:15px;">Escalação — ${teamChip(game.teamA, game.genero)}</h2>${rosterHtml(inscritosA,'A')}</div>
@@ -6684,35 +6726,6 @@ function wireGameDetailPanelEvents(gameId, panelEl){
       if(eventoRemovido) syncEnviarDelecaoImediata('sumula_evento', evId, {...eventoRemovido, gameId});
       renderScoreboard(); rerender();
     });
-  });
-  const stAddBtn = panelEl.querySelector('.stAdd');
-  if(stAddBtn) stAddBtn.addEventListener('click', ()=>{
-    const nomeEl = panelEl.querySelector('.stNome');
-    const nome = nomeEl.value.trim();
-    if(!nome){ showAlert('Informe o nome da variável.'); return; }
-    const modsMarcadas = Array.from(panelEl.querySelectorAll('.stModCheck:checked')).map(el=>el.value);
-    if(modsMarcadas.length===0){ showAlert('Marque ao menos uma modalidade em "Aplicar em quais modalidades?".'); return; }
-    let key = normalizeSearchText(nome).replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
-    if(!key) key = 'var_'+Date.now();
-    const contaPlacar = panelEl.querySelector('.stContaPlacar').checked;
-    const valor = Math.max(1, Number(panelEl.querySelector('.stValor').value)||1);
-    const adicionadas = [], jaExistentes = [];
-    modsMarcadas.forEach(mod=>{
-      if(!Array.isArray(STATE.sumulaTipos[mod])){
-        STATE.sumulaTipos[mod] = STATE.sumulaTipos._default.slice();
-      }
-      if(STATE.sumulaTipos[mod].some(t=>t.key===key)){ jaExistentes.push(mod); return; }
-      STATE.sumulaTipos[mod].push({key, label:nome, contaPlacar, valor, removivel:true});
-      adicionadas.push(mod);
-    });
-    markDirty(); rerender();
-    if(adicionadas.length===0){
-      showAlert(`Já existe uma variável chamada "${nome}" em todas as modalidades marcadas (${jaExistentes.join(', ')}) — escolha outro nome, ou marque uma modalidade diferente.`);
-    } else {
-      let msg = `Variável "${nome}" adicionada em: ${adicionadas.join(', ')}.`;
-      if(jaExistentes.length) msg += `\n\nJá existia (não duplicada) em: ${jaExistentes.join(', ')}.`;
-      showAlert(msg);
-    }
   });
 }
 
