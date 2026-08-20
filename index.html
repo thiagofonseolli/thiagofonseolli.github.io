@@ -3176,13 +3176,14 @@ function renderPainel(){
 }
 
 /* ===================== JOGOS ===================== */
-let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos';
+let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos', filtroEquipe = 'todas';
 let expandedGameId = null; // id do jogo com o painel de detalhes/súmula aberto na aba Jogos (só um por vez)
 
 function renderJogos(){
   const modalidadesOpts = [['todas','Todas'], ...STATE.modalidades.map(m=>[m,m])];
   const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino']];
   const status = [['todos','Todos'],['pendente','Pendentes'],['feito','Concluídos']];
+  const equipesOpts = [['todas','Todas'], ...STATE.teams.map(t=>[t.id, t.label])];
 
   let html = `<div class="card">
     <h2>Jogos — Esportes Coletivos</h2>
@@ -3191,6 +3192,7 @@ function renderJogos(){
       <div class="field"><label class="f-label">Modalidade</label><select id="fModalidade">${modalidadesOpts.map(([v,l])=>`<option value="${v}" ${filtroModalidade===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="fGenero">${generos.map(([v,l])=>`<option value="${v}" ${filtroGenero===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Status</label><select id="fStatus">${status.map(([v,l])=>`<option value="${v}" ${filtroStatus===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Equipe</label><select id="fEquipe">${equipesOpts.map(([v,l])=>`<option value="${v}" ${filtroEquipe===v?'selected':''} style="${v!=='todas'?teamOptionStyle(v,null):''}">${escPdf(l)}</option>`).join('')}</select></div>
     </div>
   </div>
   ${isAdmin ? `<div class="card">
@@ -3224,11 +3226,12 @@ function renderJogos(){
 
   document.getElementById('main').innerHTML = html;
   if(isAdmin) bindAdicionarVariavelSumula();
-  ['fModalidade','fGenero','fStatus'].forEach(id=>{
+  ['fModalidade','fGenero','fStatus','fEquipe'].forEach(id=>{
     document.getElementById(id).addEventListener('change', (e)=>{
       if(id==='fModalidade') filtroModalidade=e.target.value;
       if(id==='fGenero') filtroGenero=e.target.value;
       if(id==='fStatus') filtroStatus=e.target.value;
+      if(id==='fEquipe') filtroEquipe=e.target.value;
       renderGamesList();
     });
   });
@@ -3296,6 +3299,7 @@ function renderGamesList(){
   let games = STATE.games.filter(g=>{
     if(filtroModalidade!=='todas' && g.modalidade!==filtroModalidade) return false;
     if(filtroGenero!=='todos' && g.genero!==filtroGenero) return false;
+    if(filtroEquipe!=='todas' && g.teamA!==filtroEquipe && g.teamB!==filtroEquipe) return false;
     const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
     if(filtroStatus==='pendente' && done) return false;
     if(filtroStatus==='feito' && !done) return false;
