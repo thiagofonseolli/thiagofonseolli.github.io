@@ -110,6 +110,10 @@
   .badge.done{background:#E4F5EA; color:var(--green);}
   .badge.live{background:#FDE8E8; color:var(--crimson); font-weight:700; animation:pulseLive 1.8s ease-in-out infinite;}
   @keyframes pulseLive{0%,100%{opacity:1;} 50%{opacity:0.55;}}
+  .games-group-title{font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.02em; font-size:14px; color:var(--navy); margin:16px 0 8px;}
+  .games-group-title:first-child{margin-top:0;}
+  .toggle-section-btn{background:none; border:1px dashed var(--border); color:var(--muted); border-radius:6px; cursor:pointer; font-size:12.5px; padding:7px 12px; font-family:'Inter',sans-serif; display:flex; align-items:center; gap:6px; width:100%; justify-content:flex-start;}
+  .toggle-section-btn:hover{background:var(--bg); color:var(--navy);}
 
   .pill-group{display:flex; gap:6px; flex-wrap:wrap;}
 
@@ -3208,6 +3212,8 @@ function renderPainel(){
 /* ===================== JOGOS ===================== */
 let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos', filtroEquipe = 'todas', filtroLocal = 'todos', filtroData = 'todas';
 let expandedGameId = null; // id do jogo com o painel de detalhes/súmula aberto na aba Jogos (só um por vez)
+let maisFiltrosAberto = false; // Equipe/Local/Data ficam escondidos por padrão -- usados com bem menos frequência que Modalidade/Gênero/Status
+let ferramentasAdminAberto = false; // "Adicionar jogo manualmente" + "Adicionar variável de súmula" -- configuração pontual, não o que se olha no dia a dia
 
 /* Opções de equipe A/B do formulário "Adicionar jogo manualmente" — restritas ao gênero
    escolhido (usa a mesma teamsParaGenero() já usada na geração automática de jogos),
@@ -3225,6 +3231,7 @@ function renderJogos(){
   // foi preenchido nos jogos existentes, não repete o que ainda não tem partida nenhuma.
   const locaisOpts = [['todos','Todos'], ...Array.from(new Set(STATE.games.map(g=>g.local).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(l=>[l,l])];
   const datasOpts = [['todas','Todas'], ...Array.from(new Set(STATE.games.map(g=>g.data).filter(Boolean))).sort().map(d=>[d, d.split('-').reverse().join('/')])];
+  const filtrosAvancadosAtivos = filtroEquipe!=='todas' || filtroLocal!=='todos' || filtroData!=='todas';
 
   let html = `<div class="card">
     <h2>Jogos — Esportes Coletivos</h2>
@@ -3233,76 +3240,89 @@ function renderJogos(){
       <div class="field"><label class="f-label">Modalidade</label><select id="fModalidade">${modalidadesOpts.map(([v,l])=>`<option value="${v}" ${filtroModalidade===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="fGenero">${generos.map(([v,l])=>`<option value="${v}" ${filtroGenero===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Status</label><select id="fStatus">${status.map(([v,l])=>`<option value="${v}" ${filtroStatus===v?'selected':''}>${l}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Equipe</label><select id="fEquipe">${equipesOpts.map(([v,l])=>`<option value="${v}" ${filtroEquipe===v?'selected':''} style="${v!=='todas'?teamOptionStyle(v,null):''}">${escPdf(l)}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Local</label><select id="fLocal">${locaisOpts.map(([v,l])=>`<option value="${escPdf(v)}" ${filtroLocal===v?'selected':''}>${escPdf(l)}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Data</label><select id="fData">${datasOpts.map(([v,l])=>`<option value="${v}" ${filtroData===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="btnProximoPendente">⏭️ Próximo jogo pendente</button></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="btnGradeDia">📅 Grade do dia</button></div>
     </div>
-  </div>
-  ${locaisOpts.length<=1 && datasOpts.length<=1 ? `<p class="hint" style="margin:-8px 0 6px;">Assim que Local e Data forem preenchidos nas partidas (dentro de cada jogo), esses filtros passam a oferecer opções específicas.</p>` : ''}
-  ${isAdmin ? `<div class="card">
-    <h2>Adicionar jogo manualmente</h2>
-    <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes). Data/Hora/Local são opcionais aqui — dá pra preencher depois, dentro do jogo.</p>
-    <div class="row">
-      <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}</select></div>
-      <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
-      <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${ngTeamOptionsHtml('F')}</select></div>
-      <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${ngTeamOptionsHtml('F')}</select></div>
-      <div class="field"><label class="f-label">Data</label><input type="date" id="ngData"></div>
-      <div class="field"><label class="f-label">Hora</label><input type="time" id="ngHora"></div>
-      <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Local</label><input type="text" id="ngLocal" placeholder="Quadra 1"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
+    <button class="toggle-section-btn" id="btnToggleMaisFiltros">${maisFiltrosAberto?'▾':'▸'} Mais filtros (Equipe, Local, Data)${filtrosAvancadosAtivos && !maisFiltrosAberto?' — em uso':''}</button>
+    ${maisFiltrosAberto ? `<div class="row" style="margin-top:10px;">
+      <div class="field"><label class="f-label">Equipe</label><select id="fEquipe">${equipesOpts.map(([v,l])=>`<option value="${v}" ${filtroEquipe===v?'selected':''} style="${v!=='todas'?teamOptionStyle(v,null):''}">${escPdf(l)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Local</label><select id="fLocal">${locaisOpts.map(([v,l])=>`<option value="${escPdf(v)}" ${filtroLocal===v?'selected':''}>${escPdf(l)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Data</label><select id="fData">${datasOpts.map(([v,l])=>`<option value="${v}" ${filtroData===v?'selected':''}>${l}</option>`).join('')}</select></div>
     </div>
+    ${locaisOpts.length<=1 && datasOpts.length<=1 ? `<p class="hint" style="margin:8px 0 0;">Assim que Local e Data forem preenchidos nas partidas, esses filtros passam a oferecer opções específicas.</p>` : ''}` : ''}
   </div>
-  <div class="card">
-    <h2>Adicionar nova variável de súmula</h2>
-    <p class="hint">Crie um novo tipo de lançamento (ex.: "Substituição", "Advertência técnica") e escolha em quais modalidades ele deve valer. Ele passa a aparecer como botão para cada inscrito na escalação, dentro do painel de detalhes de qualquer jogo das modalidades marcadas.</p>
-    <div class="field" style="margin-bottom:10px;">
-      <label class="f-label">Aplicar em quais modalidades?</label>
-      <div class="pill-group">
-        ${STATE.modalidades.map(m=>`<label class="pill" style="display:inline-flex; align-items:center; gap:5px;"><input type="checkbox" class="stModCheck" value="${escPdf(m)}"> ${escPdf(m)}</label>`).join('')}
+  <div id="gamesList"></div>
+  ${isAdmin ? `<div class="card">
+    <button class="toggle-section-btn" id="btnToggleFerramentasAdmin">${ferramentasAdminAberto?'▾':'▸'} Ferramentas de administração (adicionar jogo manualmente, variáveis de súmula)</button>
+    ${ferramentasAdminAberto ? `
+    <div style="margin-top:16px;">
+      <h2 style="font-size:15px;">Adicionar jogo manualmente</h2>
+      <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes). Data/Hora/Local são opcionais aqui — dá pra preencher depois, dentro do jogo.</p>
+      <div class="row">
+        <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}</select></div>
+        <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+        <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${ngTeamOptionsHtml('F')}</select></div>
+        <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${ngTeamOptionsHtml('F')}</select></div>
+        <div class="field"><label class="f-label">Data</label><input type="date" id="ngData"></div>
+        <div class="field"><label class="f-label">Hora</label><input type="time" id="ngHora"></div>
+        <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Local</label><input type="text" id="ngLocal" placeholder="Quadra 1"></div>
+        <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
       </div>
     </div>
-    <div class="row">
-      <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
-      <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
-      <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
-    </div>
-    <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--border);">
-      <p class="f-label" style="margin-bottom:8px;">Variáveis cadastradas por modalidade</p>
-      <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar aparecem com um "✕" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
-      ${STATE.modalidades.length===0 ? '<p class="hint">Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".</p>' : STATE.modalidades.map(mod=>{
-        const tipos = sumulaTiposDaModalidade(mod);
-        return `<div style="margin-bottom:10px;">
-          <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
-          <div class="pill-group">
-            ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
-          </div>
-        </div>`;
-      }).join('')}
-    </div>
-  </div>` : ''}
-  <div id="gamesList"></div>`;
+    <div style="margin-top:20px; padding-top:16px; border-top:1px dashed var(--border);">
+      <h2 style="font-size:15px;">Adicionar nova variável de súmula</h2>
+      <p class="hint">Crie um novo tipo de lançamento (ex.: "Substituição", "Advertência técnica") e escolha em quais modalidades ele deve valer. Ele passa a aparecer como botão para cada inscrito na escalação, dentro do painel de detalhes de qualquer jogo das modalidades marcadas.</p>
+      <div class="field" style="margin-bottom:10px;">
+        <label class="f-label">Aplicar em quais modalidades?</label>
+        <div class="pill-group">
+          ${STATE.modalidades.map(m=>`<label class="pill" style="display:inline-flex; align-items:center; gap:5px;"><input type="checkbox" class="stModCheck" value="${escPdf(m)}"> ${escPdf(m)}</label>`).join('')}
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
+        <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
+        <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
+        <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
+      </div>
+      <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--border);">
+        <p class="f-label" style="margin-bottom:8px;">Variáveis cadastradas por modalidade</p>
+        <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar aparecem com um "✕" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
+        ${STATE.modalidades.length===0 ? '<p class="hint">Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".</p>' : STATE.modalidades.map(mod=>{
+          const tipos = sumulaTiposDaModalidade(mod);
+          return `<div style="margin-bottom:10px;">
+            <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
+            <div class="pill-group">
+              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+  </div>` : ''}`;
 
   document.getElementById('main').innerHTML = html;
-  if(isAdmin) bindAdicionarVariavelSumula();
+  if(isAdmin && ferramentasAdminAberto) bindAdicionarVariavelSumula();
+  document.getElementById('btnToggleMaisFiltros').addEventListener('click', ()=>{ maisFiltrosAberto = !maisFiltrosAberto; renderJogos(); });
   ['fModalidade','fGenero','fStatus','fEquipe','fLocal','fData'].forEach(id=>{
-    document.getElementById(id).addEventListener('change', (e)=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener('change', (e)=>{
       if(id==='fModalidade') filtroModalidade=e.target.value;
       if(id==='fGenero') filtroGenero=e.target.value;
       if(id==='fStatus') filtroStatus=e.target.value;
       if(id==='fEquipe') filtroEquipe=e.target.value;
       if(id==='fLocal') filtroLocal=e.target.value;
       if(id==='fData') filtroData=e.target.value;
-      renderGamesList();
+      renderGamesList(); // redesenha a lista (também reagrupa por modalidade, se aplicável)
     });
   });
   document.getElementById('btnProximoPendente').addEventListener('click', irParaProximoJogoPendente);
   document.getElementById('btnGradeDia').addEventListener('click', openGradeDiaModal);
 
   if(isAdmin){
+    document.getElementById('btnToggleFerramentasAdmin').addEventListener('click', ()=>{ ferramentasAdminAberto = !ferramentasAdminAberto; renderJogos(); });
+  }
+  if(isAdmin && ferramentasAdminAberto){
     document.getElementById('ngGenero').addEventListener('change', (e)=>{
       const opts = ngTeamOptionsHtml(e.target.value);
       document.getElementById('ngTeamA').innerHTML = opts;
@@ -3406,7 +3426,23 @@ function renderGamesList(){
   const filtrosAtivos = games.length!==totalGeral;
   const contadorHtml = `<p class="hint" style="margin:0 0 8px;">${games.length} de ${totalGeral} partida${totalGeral===1?'':'s'}${filtrosAtivos?' (com os filtros aplicados)':''}.</p>`;
   if(games.length===0){ container.innerHTML = contadorHtml + `<div class="card"><p class="hint">Nenhuma partida encontrada com esses filtros.</p></div>`; return; }
-  container.innerHTML = contadorHtml + `<div class="card">` + games.map(g=> gameRowHtml(g)).join('') + `</div>`;
+
+  // Com "Modalidade: Todas", agrupa a lista por modalidade (na ordem cadastrada) -- bem
+  // mais fácil de escanear visualmente do que uma lista corrida misturando tudo. Com uma
+  // modalidade específica escolhida, o agrupamento não faz sentido (só teria um grupo).
+  let corpoHtml;
+  if(filtroModalidade==='todas'){
+    const porModalidade = {};
+    games.forEach(g=>{ (porModalidade[g.modalidade] = porModalidade[g.modalidade] || []).push(g); });
+    const ordem = [...STATE.modalidades.filter(m=>porModalidade[m]), ...Object.keys(porModalidade).filter(m=>!STATE.modalidades.includes(m))];
+    corpoHtml = ordem.map(mod=>`
+      <p class="games-group-title">${escPdf(mod)} <span style="font-family:'Inter',sans-serif; text-transform:none; letter-spacing:normal; color:var(--muted); font-weight:400; font-size:12px;">(${porModalidade[mod].length})</span></p>
+      <div class="card">${porModalidade[mod].map(g=> gameRowHtml(g)).join('')}</div>
+    `).join('');
+  } else {
+    corpoHtml = `<div class="card">${games.map(g=> gameRowHtml(g)).join('')}</div>`;
+  }
+  container.innerHTML = contadorHtml + corpoHtml;
 
   container.querySelectorAll('.game-row').forEach(card=>{
     const id = Number(card.dataset.id);
