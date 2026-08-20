@@ -1618,7 +1618,7 @@ function defaultRegras(){
    diferentes espaços/locais, horários e dias, respeitando regras gerais e as modalidades
    permitidas em cada local (ver seção "GERADOR DE TABELA" mais abaixo). */
 function defaultGeradorTabela(){
-  return { regras: [], locais: [] };
+  return { regras: [], locais: [], tempoDeslocamento: 0 };
 }
 
 function defaultState(){
@@ -3866,6 +3866,11 @@ function renderGtStep3(){
   </div>`;
   html += locais.map(l=>renderGtModalidadesCard(l)).join('');
   html += `<div class="card">
+    <div class="field" style="margin-bottom:12px;">
+      <label class="f-label">Tempo mínimo de deslocamento entre locais diferentes (min)</label>
+      <input type="number" min="0" id="gtTempoDeslocamento" value="${STATE.geradorTabela.tempoDeslocamento||0}" style="width:100px;">
+      <p class="hint" style="margin:4px 0 0;">Se uma Equipe joga em dois locais diferentes no mesmo dia, o gerador garante pelo menos esse intervalo entre o fim de um confronto e o início do outro — evita marcar dois jogos em quadras diferentes tempo insuficiente pra Equipe se deslocar entre eles. Deixe 0 para não aplicar essa margem (só evita horários exatamente coincidentes, como antes).</p>
+    </div>
     <label style="font-size:13px; display:flex; gap:8px; align-items:center;"><input type="checkbox" id="gtSobrescrever"> <span>Também reprogramar confrontos que já têm data/horário/local definidos</span></label>
     <div class="esp-wizard-nav" style="margin-top:14px;">
       <button class="btn secondary" id="gtBack3">← Voltar</button>
@@ -4105,6 +4110,16 @@ function gtProximoSlot(local, estado){
   }
   return null; // esgotou o tempo em todos os dias do período deste local
 }
+/* Duração (minutos) do local com esse nome — usada pra saber até que horário uma
+   Equipe fica "ocupada" num confronto já marcado, ao checar deslocamento entre locais
+   diferentes. Locais digitados manualmente (sem cadastro correspondente no Gerador de
+   Tabela) caem no fallback 0 — não têm duração conhecida, então só o próprio horário de
+   início é considerado (mais seguro do que arriscar um valor errado). */
+function gtDuracaoDoLocalPorNome(nome){
+  const local = STATE.geradorTabela.locais.find(l=>l.nome===nome);
+  return local ? (Number(local.duracaoJogo)||0) : 0;
+}
+
 function gerarTabelaConfrontos(sobrescrever){
   const locais = STATE.geradorTabela.locais.filter(l=> l.horaInicio && gtOcupacaoTotal(l)>0);
   if(!locais.length) return {erro:'Cadastre pelo menos um local com horário de início e tempo de ocupação (jogo + intervalo) definidos.'};
@@ -4120,17 +4135,42 @@ function gerarTabelaConfrontos(sobrescrever){
   let candidatos = STATE.games.filter(g=> porModalidade[g.modalidade] && (sobrescrever || !g.hora));
   candidatos.sort((a,b)=> (a.modalidade+a.genero).localeCompare(b.modalidade+b.genero) || a.id-b.id);
 
-  // Ocupação de cada Equipe por dia+horário, em QUALQUER local — usada para nunca escalar a
-  // mesma Equipe em dois confrontos ao mesmo tempo em quadras diferentes. Começa já marcando
-  // os confrontos que não serão remarcados nesta geração (para respeitar horários fixados
-  // manualmente também).
-  const ocupTeam = {}; // chave `${teamId}|${data}|${hora}` -> true
-  const marcarOcupado = (teamId, data, hora)=>{ if(teamId && data && hora) ocupTeam[`${teamId}|${data}|${hora}`] = true; };
-  const estaOcupado = (teamId, data, hora)=> !!(teamId && data && hora && ocupTeam[`${teamId}|${data}|${hora}`]);
+  const tempoDeslocamento = Math.max(0, Number(STATE.geradorTabela.tempoDeslocamento)||0);
+
+  /* Ocupação de cada Equipe por dia, em QUALQUER local — usada para nunca escalar a mesma
+     Equipe em dois confrontos que colidam no tempo. Guarda o intervalo [início, fim] real
+     de cada confronto (não só o horário de início), porque um confronto ocupa a Equipe
+     durante toda a sua duração, não num instante só. Com dois confrontos em locais
+     DIFERENTES, também exige pelo menos `tempoDeslocamento` minutos de intervalo entre o
+     fim de um e o início do outro — sem isso, "20 minutos depois, numa quadra do outro
+     lado" passava despercebido mesmo sendo, na prática, impossível de cumprir. Começa já
+     marcando os confrontos que não serão remarcados nesta geração (para respeitar
+     horários fixados manualmente também). */
+  const ocupTeam = {}; // teamId -> [{data, inicio, fim, local}]
+  const marcarOcupado = (teamId, data, hora, local, duracao)=>{
+    if(!teamId || !data || !hora) return;
+    const inicio = gtTimeToMin(hora);
+    if(inicio==null) return;
+    (ocupTeam[teamId] = ocupTeam[teamId]||[]).push({data, inicio, fim: inicio+(Number(duracao)||0), local});
+  };
+  const conflitaComDeslocamento = (teamId, data, hora, local, duracao)=>{
+    if(!teamId || !data || !hora) return false;
+    const inicio = gtTimeToMin(hora);
+    if(inicio==null) return false;
+    const fim = inicio + (Number(duracao)||0);
+    return (ocupTeam[teamId]||[]).some(ocup=>{
+      if(ocup.data !== data) return false;
+      const margem = (ocup.local===local) ? 0 : tempoDeslocamento;
+      // "gap" entre os dois intervalos: negativo/zero quando ha sobreposicao real
+      const gap = inicio>=ocup.fim ? (inicio-ocup.fim) : (ocup.inicio>=fim ? (ocup.inicio-fim) : -1);
+      return gap < margem;
+    });
+  };
   STATE.games.forEach(g=>{
     if(g.hora && g.data && !candidatos.includes(g)){
-      marcarOcupado(g.teamA, g.data, g.hora);
-      marcarOcupado(g.teamB, g.data, g.hora);
+      const duracaoExistente = gtDuracaoDoLocalPorNome(g.local);
+      marcarOcupado(g.teamA, g.data, g.hora, g.local, duracaoExistente);
+      marcarOcupado(g.teamB, g.data, g.hora, g.local, duracaoExistente);
     }
   });
 
@@ -4144,9 +4184,10 @@ function gerarTabelaConfrontos(sobrescrever){
       const local = locaisCompativeis[idx % locaisCompativeis.length];
       idx++; tentativas++;
       let slot = gtProximoSlot(local, estados[local.id]);
-      // Pula slots em que a Equipe A ou a Equipe B já têm outro confronto no mesmo dia/horário
+      // Pula slots em que a Equipe A ou a Equipe B já têm outro confronto que colide
+      // (mesmo horário, ou deslocamento insuficiente entre locais diferentes)
       let tentativasSlot = 0;
-      while(slot && (estaOcupado(g.teamA, slot.data, slot.hora) || estaOcupado(g.teamB, slot.data, slot.hora)) && tentativasSlot < 400){
+      while(slot && (conflitaComDeslocamento(g.teamA, slot.data, slot.hora, local.nome, local.duracaoJogo) || conflitaComDeslocamento(g.teamB, slot.data, slot.hora, local.nome, local.duracaoJogo)) && tentativasSlot < 400){
         conflitosEvitados++;
         slot = gtProximoSlot(local, estados[local.id]);
         tentativasSlot++;
@@ -4155,8 +4196,8 @@ function gerarTabelaConfrontos(sobrescrever){
       g.hora = slot.hora;
       g.local = local.nome;
       if(slot.data) g.data = slot.data;
-      marcarOcupado(g.teamA, slot.data, slot.hora);
-      marcarOcupado(g.teamB, slot.data, slot.hora);
+      marcarOcupado(g.teamA, slot.data, slot.hora, local.nome, local.duracaoJogo);
+      marcarOcupado(g.teamB, slot.data, slot.hora, local.nome, local.duracaoJogo);
       syncMarcarSujoGame(g.id);
       agendados++; alocado = true;
       break;
@@ -4301,6 +4342,11 @@ function bindGeradorTabelaEvents(){
     });
     const back3 = document.getElementById('gtBack3');
     if(back3) back3.addEventListener('click', ()=>{ gtWizardStep=2; renderGeradorTabela(); });
+    const tempoDeslocEl = document.getElementById('gtTempoDeslocamento');
+    if(tempoDeslocEl) tempoDeslocEl.addEventListener('change', ()=>{
+      STATE.geradorTabela.tempoDeslocamento = Math.max(0, Number(tempoDeslocEl.value)||0);
+      markDirty();
+    });
     const gerarBtn = document.getElementById('gtGerarTabela');
     if(gerarBtn) gerarBtn.addEventListener('click', ()=>{
       const sobre = document.getElementById('gtSobrescrever').checked;
@@ -4310,7 +4356,7 @@ function bindGeradorTabelaEvents(){
       }else{
         markDirty();
         let msg = `✅ ${res.agendados} confronto(s) programado(s).`;
-        if(res.conflitosEvitados>0) msg += ` 🛡️ ${res.conflitosEvitados} tentativa(s) de horário evitada(s) por colidir com outra Equipe já escalada naquele dia/hora.`;
+        if(res.conflitosEvitados>0) msg += ` 🛡️ ${res.conflitosEvitados} tentativa(s) de horário evitada(s) por colidir com outra Equipe já escalada naquele dia/hora (mesmo local ou deslocamento insuficiente entre locais).`;
         if(res.semEspaco>0) msg += ` ⚠️ ${res.semEspaco} confronto(s) não couberam em nenhum local compatível — aumente o horário de término, adicione mais locais/dias ou marque mais modalidades para esses locais.`;
         gtUltimoResultadoMsg = msg;
       }
