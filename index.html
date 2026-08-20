@@ -3229,6 +3229,19 @@ function renderJogos(){
       <div class="field"><label class="f-label">Valor no placar</label><input type="number" class="stValor" value="1" min="1" style="width:70px;"></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn stAdd">+ Adicionar variável</button></div>
     </div>
+    <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--border);">
+      <p class="f-label" style="margin-bottom:8px;">Variáveis cadastradas por modalidade</p>
+      <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar aparecem com um "✕" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
+      ${STATE.modalidades.length===0 ? '<p class="hint">Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".</p>' : STATE.modalidades.map(mod=>{
+        const tipos = sumulaTiposDaModalidade(mod);
+        return `<div style="margin-bottom:10px;">
+          <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
+          <div class="pill-group">
+            ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
   </div>` : ''}
   <div id="gamesList"></div>`;
 
@@ -3290,11 +3303,7 @@ function bindAdicionarVariavelSumula(){
       adicionadas.push(mod);
     });
     markDirty();
-    nomeEl.value = '';
-    document.querySelector('.stContaPlacar').checked = false;
-    document.querySelector('.stValor').value = '1';
-    document.querySelectorAll('.stModCheck').forEach(el=> el.checked=false);
-    renderGamesList(); // atualiza o painel de qualquer jogo já expandido com a variável nova
+    renderJogos(); // refaz a aba inteira -- atualiza a lista "Variáveis cadastradas" e qualquer jogo já expandido
     if(adicionadas.length===0){
       showAlert(`Já existe uma variável chamada "${nome}" em todas as modalidades marcadas (${jaExistentes.join(', ')}) — escolha outro nome, ou marque uma modalidade diferente.`);
     } else {
@@ -3302,6 +3311,25 @@ function bindAdicionarVariavelSumula(){
       if(jaExistentes.length) msg += `\n\nJá existia (não duplicada) em: ${jaExistentes.join(', ')}.`;
       showAlert(msg);
     }
+  });
+
+  document.querySelectorAll('.removeSumulaTipo').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const mod = btn.dataset.mod, key = btn.dataset.key;
+      const tipo = (STATE.sumulaTipos[mod]||[]).find(t=>t.key===key);
+      if(!tipo) return;
+      // conta quantos lançamentos já existentes usam essa variável, pra avisar antes de remover
+      let contagem = 0;
+      Object.values(STATE.sumulas).forEach(s=>{ contagem += (s.eventos||[]).filter(e=>e.tipo===key).length; });
+      const aviso = contagem>0
+        ? `Remover a variável "${tipo.label}" de ${mod}? Já existem ${contagem} lançamento(s) registrado(s) com ela — eles continuam no histórico normalmente, só o botão de lançar novas ocorrências desse tipo vai desaparecer.`
+        : `Remover a variável "${tipo.label}" de ${mod}?`;
+      showConfirm(aviso, ()=>{
+        STATE.sumulaTipos[mod] = STATE.sumulaTipos[mod].filter(t=>t.key!==key);
+        markDirty();
+        renderJogos();
+      });
+    });
   });
 }
 
