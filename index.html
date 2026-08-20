@@ -3720,6 +3720,9 @@ function nextGtLocalId(){
 function nextGtRegraId(){
   return (STATE.geradorTabela.regras.reduce((m,r)=>Math.max(m,r.id),0)) + 1;
 }
+function nextGtBloqueioId(local){
+  return ((local.bloqueios||[]).reduce((m,b)=>Math.max(m,b.id),0)) + 1;
+}
 
 /* ----- Renderização principal ----- */
 function renderGeradorTabela(){
@@ -3802,16 +3805,27 @@ function renderGtStep2(){
   </div>`;
   return html;
 }
+function gtMinutosDisponiveisPorDia(local){
+  const iniMin = gtTimeToMin(local.horaInicio), fimMin = gtTimeToMin(local.horaFim);
+  if(iniMin==null || fimMin==null || fimMin<=iniMin) return null;
+  let bloqueado = 0;
+  gtBloqueiosValidos(local).forEach(b=>{
+    const ini = Math.max(b.ini, iniMin), fim = Math.min(b.fim, fimMin);
+    if(fim>ini) bloqueado += (fim-ini);
+  });
+  return Math.max(0, (fimMin-iniMin) - bloqueado);
+}
 function renderGtLocalCard(local){
   const total = gtOcupacaoTotal(local);
-  const iniMin = gtTimeToMin(local.horaInicio), fimMin = gtTimeToMin(local.horaFim);
-  const capacidadeDia = (iniMin!=null && fimMin!=null && total>0 && fimMin>iniMin) ? Math.floor((fimMin-iniMin)/total) : null;
+  const disponivelDia = gtMinutosDisponiveisPorDia(local);
+  const capacidadeDia = (disponivelDia!=null && total>0) ? Math.floor(disponivelDia/total) : null;
   const datas = gtExpandDatas(local);
   const numDias = datas[0]!=null ? datas.length : 0;
   const capacidadeTotal = (capacidadeDia!=null && numDias>0) ? capacidadeDia*numDias : null;
   let periodoLabel = '';
   if(local.dataInicio && local.dataFim && local.dataInicio!==local.dataFim) periodoLabel = `${formatDateBR(local.dataInicio)} a ${formatDateBR(local.dataFim)} (${numDias} dias)`;
   else if(local.dataInicio || local.dataFim) periodoLabel = formatDateBR(local.dataInicio||local.dataFim);
+  const bloqueios = local.bloqueios||[];
   return `<div class="card gt-local-card" data-local="${local.id}">
     <div class="row" style="justify-content:space-between; align-items:flex-start;">
       <div class="field" style="flex:1; min-width:160px;"><label class="f-label">Nome</label><input type="text" class="gtNome" value="${escPdf(local.nome)}"></div>
@@ -3827,7 +3841,19 @@ function renderGtLocalCard(local){
       <div class="field"><label class="f-label">Tempo de jogo (min)</label><input type="number" min="0" class="gtDuracao" value="${local.duracaoJogo}" style="width:90px;"></div>
       <div class="field"><label class="f-label">Intervalo/téc. (min)</label><input type="number" min="0" class="gtTecnico" value="${local.tempoTecnico}" style="width:90px;"></div>
     </div>
-    <p class="hint" style="margin:8px 0 0;">⏱️ Ocupação por confronto: <strong>${total} min</strong>${periodoLabel?` · período: <strong>${periodoLabel}</strong>`:' · sem período de datas definido (funciona como programação única, sem data atribuída aos jogos)'}${capacidadeTotal!=null?` · capacidade estimada no período: <strong>${capacidadeTotal} confronto${capacidadeTotal===1?'':'s'}</strong>`:(capacidadeDia!=null?` · capacidade por dia: <strong>${capacidadeDia} confronto${capacidadeDia===1?'':'s'}</strong>`:'')}.</p>
+    <p class="hint" style="margin:8px 0 0;">⏱️ Ocupação por confronto: <strong>${total} min</strong>${periodoLabel?` · período: <strong>${periodoLabel}</strong>`:' · sem período de datas definido (funciona como programação única, sem data atribuída aos jogos)'}${capacidadeTotal!=null?` · capacidade estimada no período: <strong>${capacidadeTotal} confronto${capacidadeTotal===1?'':'s'}</strong>`:(capacidadeDia!=null?` · capacidade por dia: <strong>${capacidadeDia} confronto${capacidadeDia===1?'':'s'}</strong>`:'')}${bloqueios.length?` (já descontando ${bloqueios.length} bloqueio${bloqueios.length===1?'':'s'} de horário)`:''}.</p>
+    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
+      <label class="f-label" style="margin-bottom:6px; display:block;">Bloqueios de horário (ex.: almoço) — o gerador pula esses intervalos automaticamente</label>
+      ${bloqueios.length ? `<div class="pill-group" style="margin-bottom:8px;">
+        ${bloqueios.map(b=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(b.inicio)}–${escPdf(b.fim)}${b.motivo?` (${escPdf(b.motivo)})`:''}<button class="danger gtRemoveBloqueio" data-bloqueio="${b.id}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
+      </div>` : ''}
+      <div class="row">
+        <div class="field"><label class="f-label">Início</label><input type="time" class="gtBloqueioInicio" style="width:110px;"></div>
+        <div class="field"><label class="f-label">Fim</label><input type="time" class="gtBloqueioFim" style="width:110px;"></div>
+        <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Motivo (opcional)</label><input type="text" class="gtBloqueioMotivo" placeholder="Ex.: Almoço"></div>
+        <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary small gtAddBloqueio">+ Bloquear intervalo</button></div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -3892,11 +3918,11 @@ function renderGtResumoHtml(){
    conflito. Continua sendo só uma "vitrine" dos confrontos: placar, W.O. e jogo limpo
    continuam sendo lançados na aba "Jogos" — aqui só se mexe em local/data/horário. */
 function gtRenderMatchCard(g, temConflito){
-  const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
+  const statusInfo = gameStatusInfo(g);
   return `<div class="game-card gt-match-card" data-gtgame="${g.id}" style="padding:9px 11px; margin-bottom:8px; ${temConflito?'border-color:var(--crimson); background:#FDECEC;':''}">
     <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted); margin-bottom:5px;">
       <span class="mono">${g.hora||'--:--'}</span>
-      <span class="badge ${done?'done':''}">${done?'Concluído':'Pendente'}</span>
+      <span class="badge ${statusInfo.status==='concluido'?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span>
     </div>
     ${temConflito ? `<div style="font-size:10.5px; color:var(--crimson); font-weight:700; margin-bottom:5px;">⚠️ Equipe em choque de horário</div>` : ''}
     <div style="font-size:12.5px; line-height:1.6;">${teamChip(g.teamA,g.genero)} <span class="hint" style="margin:0;">×</span> ${teamChip(g.teamB,g.genero)}</div>
@@ -4003,17 +4029,26 @@ function closeGtReagendarModal(){
   document.getElementById('gtReagendarModal').classList.remove('open');
   gtReagendarGameId = null;
 }
+/* Checa DOIS tipos de conflito ao reagendar manualmente — antes só checava equipe
+   (a aba Jogos, em verificarConflitoHorarioLocal(), já checava local há um tempo, mas
+   esse modal específico do Gerador de Tabela tinha ficado pra trás; agora os dois
+   caminhos avisam da mesma forma). */
 function atualizarGtReagendarConflitoAviso(){
   const g = STATE.games.find(x=>x.id===gtReagendarGameId);
   const avisoEl = document.getElementById('gtrConflitoAviso');
   if(!g || !avisoEl) return;
   const data = document.getElementById('gtrData').value;
   const hora = document.getElementById('gtrHora').value;
+  const local = document.getElementById('gtrLocal').value.trim();
   if(!data || !hora){ avisoEl.style.display='none'; return; }
-  const conflito = STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora &&
+  const conflitoEquipe = STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora &&
     (x.teamA===g.teamA || x.teamB===g.teamA || x.teamA===g.teamB || x.teamB===g.teamB));
-  if(conflito){
-    avisoEl.textContent = '⚠️ Uma das Equipes desse confronto já tem outro jogo nesse mesmo dia e horário.';
+  const conflitoLocal = !!local && STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora && x.local===local);
+  const avisos = [];
+  if(conflitoEquipe) avisos.push('uma das Equipes desse confronto já tem outro jogo nesse mesmo dia e horário');
+  if(conflitoLocal) avisos.push('esse local já tem outro confronto marcado nesse mesmo dia e horário');
+  if(avisos.length){
+    avisoEl.textContent = '⚠️ Atenção: ' + avisos.join('; e ') + '.';
     avisoEl.style.display = 'block';
   } else {
     avisoEl.style.display = 'none';
@@ -4035,11 +4070,30 @@ function saveGtReagendarModal(){
    Cada local aplica o mesmo horário de funcionamento a todos os dias do seu período
    (dataInicio–dataFim): o dia é preenchido até a capacidade e, ao esgotar, os confrontos
    seguintes passam automaticamente para o próximo dia do período do mesmo local. */
+function gtBloqueiosValidos(local){
+  return (local.bloqueios||[])
+    .map(b=>({ini:gtTimeToMin(b.inicio), fim:gtTimeToMin(b.fim)}))
+    .filter(b=> b.ini!=null && b.fim!=null && b.fim>b.ini);
+}
 function gtProximoSlot(local, estado){
   const fimMin = gtTimeToMin(local.horaFim);
   const duracaoJogo = Number(local.duracaoJogo)||0;
   const total = gtOcupacaoTotal(local);
+  const bloqueios = gtBloqueiosValidos(local);
   while(estado.dayIdx < estado.datas.length){
+    // Se o confronto (do inicio dele ate o fim da duracao de jogo) cai dentro de algum
+    // bloqueio (ex.: almoço), pula pro fim do bloqueio antes de considerar o slot --
+    // repete a checagem porque pular um bloqueio pode cair dentro de outro em seguida.
+    let guard = 0;
+    for(let colidiu=true; colidiu && guard<50; guard++){
+      colidiu = false;
+      for(const b of bloqueios){
+        if(estado.min < b.fim && (estado.min + duracaoJogo) > b.ini){
+          estado.min = b.fim;
+          colidiu = true;
+        }
+      }
+    }
     if(fimMin==null || (estado.min + duracaoJogo) <= fimMin){
       const data = estado.datas[estado.dayIdx];
       const hora = gtMinToTime(estado.min);
@@ -4185,7 +4239,7 @@ function bindGeradorTabelaEvents(){
       const horaFim = document.getElementById('gtNovoFim').value;
       const duracaoJogo = Number(document.getElementById('gtNovoDuracao').value)||0;
       const tempoTecnico = Number(document.getElementById('gtNovoTecnico').value)||0;
-      STATE.geradorTabela.locais.push({id: nextGtLocalId(), nome, dataInicio, dataFim, horaInicio, horaFim, duracaoJogo, tempoTecnico, modalidades:[]});
+      STATE.geradorTabela.locais.push({id: nextGtLocalId(), nome, dataInicio, dataFim, horaInicio, horaFim, duracaoJogo, tempoTecnico, modalidades:[], bloqueios:[]});
       markDirty(); renderGeradorTabela();
     });
 
@@ -4203,6 +4257,23 @@ function bindGeradorTabelaEvents(){
       card.querySelector('.gtRemoveLocal').addEventListener('click', ()=>{
         showConfirm(`Remover o local "${local.nome}"?`, ()=>{
           STATE.geradorTabela.locais = STATE.geradorTabela.locais.filter(l=>l.id!==localId);
+          markDirty(); renderGeradorTabela();
+        });
+      });
+      card.querySelector('.gtAddBloqueio').addEventListener('click', ()=>{
+        const inicio = card.querySelector('.gtBloqueioInicio').value;
+        const fim = card.querySelector('.gtBloqueioFim').value;
+        const motivo = card.querySelector('.gtBloqueioMotivo').value.trim();
+        if(!inicio || !fim){ showAlert('Preencha início e fim do intervalo a bloquear.'); return; }
+        if(gtTimeToMin(fim) <= gtTimeToMin(inicio)){ showAlert('O horário de fim precisa ser depois do início.'); return; }
+        if(!Array.isArray(local.bloqueios)) local.bloqueios = [];
+        local.bloqueios.push({id: nextGtBloqueioId(local), inicio, fim, motivo});
+        markDirty(); renderGeradorTabela();
+      });
+      card.querySelectorAll('.gtRemoveBloqueio').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const bloqueioId = Number(btn.dataset.bloqueio);
+          local.bloqueios = (local.bloqueios||[]).filter(b=>b.id!==bloqueioId);
           markDirty(); renderGeradorTabela();
         });
       });
@@ -7902,6 +7973,7 @@ function renderViewOnlyBanner(){
   document.getElementById('saveGtReagendarBtn').addEventListener('click', saveGtReagendarModal);
   document.getElementById('gtrData').addEventListener('input', atualizarGtReagendarConflitoAviso);
   document.getElementById('gtrHora').addEventListener('input', atualizarGtReagendarConflitoAviso);
+  document.getElementById('gtrLocal').addEventListener('input', atualizarGtReagendarConflitoAviso);
   document.getElementById('gtReagendarModal').addEventListener('click', (e)=>{ if(e.target.id==='gtReagendarModal') closeGtReagendarModal(); });
   document.getElementById('closeHeaderModal').addEventListener('click', closeHeaderModal);
   document.getElementById('cancelHeaderBtn').addEventListener('click', closeHeaderModal);
