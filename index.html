@@ -6582,8 +6582,14 @@ function buildGameDetailHtml(gameId){
   </div>
 
   ${isAdmin ? `<div class="card">
-    <h2 style="font-size:15px;">Adicionar nova variável — ${escPdf(game.modalidade)}</h2>
-    <p class="hint">Crie um novo tipo de lançamento específico da modalidade <strong>${escPdf(game.modalidade)}</strong> (ex.: "Substituição", "Advertência técnica"). Ele passa a aparecer como botão para cada inscrito na escalação abaixo, só em jogos de ${escPdf(game.modalidade)} — as demais modalidades não são afetadas.</p>
+    <h2 style="font-size:15px;">Adicionar nova variável</h2>
+    <p class="hint">Crie um novo tipo de lançamento (ex.: "Substituição", "Advertência técnica") e escolha em quais modalidades ele deve valer — pode ser só nesta (${escPdf(game.modalidade)}) ou em várias de uma vez. Ele passa a aparecer como botão para cada inscrito na escalação, nos jogos das modalidades marcadas.</p>
+    <div class="field" style="margin-bottom:10px;">
+      <label class="f-label">Aplicar em quais modalidades?</label>
+      <div class="pill-group">
+        ${STATE.modalidades.map(m=>`<label class="pill" style="display:inline-flex; align-items:center; gap:5px;"><input type="checkbox" class="stModCheck" value="${escPdf(m)}" ${m===game.modalidade?'checked':''}> ${escPdf(m)}</label>`).join('')}
+      </div>
+    </div>
     <div class="row">
       <div class="field"><label class="f-label">Nome da variável</label><input type="text" class="stNome" placeholder="Ex.: Ponto" style="width:180px;"></div>
       <div class="field"><label class="f-label">&nbsp;</label><label style="font-size:12.5px; display:flex; align-items:center; gap:5px;"><input type="checkbox" class="stContaPlacar"> Conta como ponto no placar</label></div>
@@ -6684,16 +6690,29 @@ function wireGameDetailPanelEvents(gameId, panelEl){
     const nomeEl = panelEl.querySelector('.stNome');
     const nome = nomeEl.value.trim();
     if(!nome){ showAlert('Informe o nome da variável.'); return; }
-    let key = nome.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+    const modsMarcadas = Array.from(panelEl.querySelectorAll('.stModCheck:checked')).map(el=>el.value);
+    if(modsMarcadas.length===0){ showAlert('Marque ao menos uma modalidade em "Aplicar em quais modalidades?".'); return; }
+    let key = normalizeSearchText(nome).replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
     if(!key) key = 'var_'+Date.now();
-    if(!Array.isArray(STATE.sumulaTipos[game.modalidade])){
-      STATE.sumulaTipos[game.modalidade] = STATE.sumulaTipos._default.slice();
-    }
-    if(STATE.sumulaTipos[game.modalidade].some(t=>t.key===key)){ showAlert('Já existe uma variável com esse nome nesta modalidade.'); return; }
     const contaPlacar = panelEl.querySelector('.stContaPlacar').checked;
     const valor = Math.max(1, Number(panelEl.querySelector('.stValor').value)||1);
-    STATE.sumulaTipos[game.modalidade].push({key, label:nome, contaPlacar, valor, removivel:true});
+    const adicionadas = [], jaExistentes = [];
+    modsMarcadas.forEach(mod=>{
+      if(!Array.isArray(STATE.sumulaTipos[mod])){
+        STATE.sumulaTipos[mod] = STATE.sumulaTipos._default.slice();
+      }
+      if(STATE.sumulaTipos[mod].some(t=>t.key===key)){ jaExistentes.push(mod); return; }
+      STATE.sumulaTipos[mod].push({key, label:nome, contaPlacar, valor, removivel:true});
+      adicionadas.push(mod);
+    });
     markDirty(); rerender();
+    if(adicionadas.length===0){
+      showAlert(`Já existe uma variável chamada "${nome}" em todas as modalidades marcadas (${jaExistentes.join(', ')}) — escolha outro nome, ou marque uma modalidade diferente.`);
+    } else {
+      let msg = `Variável "${nome}" adicionada em: ${adicionadas.join(', ')}.`;
+      if(jaExistentes.length) msg += `\n\nJá existia (não duplicada) em: ${jaExistentes.join(', ')}.`;
+      showAlert(msg);
+    }
   });
 }
 
