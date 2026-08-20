@@ -3176,7 +3176,7 @@ function renderPainel(){
 }
 
 /* ===================== JOGOS ===================== */
-let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos', filtroEquipe = 'todas';
+let filtroModalidade = 'todas', filtroGenero = 'todos', filtroStatus = 'todos', filtroEquipe = 'todas', filtroLocal = 'todos', filtroData = 'todas';
 let expandedGameId = null; // id do jogo com o painel de detalhes/súmula aberto na aba Jogos (só um por vez)
 
 function renderJogos(){
@@ -3184,6 +3184,11 @@ function renderJogos(){
   const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino']];
   const status = [['todos','Todos'],['pendente','Pendentes'],['feito','Concluídos']];
   const equipesOpts = [['todas','Todas'], ...STATE.teams.map(t=>[t.id, t.label])];
+  // Local e Data são texto livre preenchido pelo admin em cada jogo (não uma lista fixa
+  // como modalidade/equipe) — então as opções do filtro são montadas a partir do que já
+  // foi preenchido nos jogos existentes, não repete o que ainda não tem partida nenhuma.
+  const locaisOpts = [['todos','Todos'], ...Array.from(new Set(STATE.games.map(g=>g.local).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(l=>[l,l])];
+  const datasOpts = [['todas','Todas'], ...Array.from(new Set(STATE.games.map(g=>g.data).filter(Boolean))).sort().map(d=>[d, d.split('-').reverse().join('/')])];
 
   let html = `<div class="card">
     <h2>Jogos — Esportes Coletivos</h2>
@@ -3193,8 +3198,11 @@ function renderJogos(){
       <div class="field"><label class="f-label">Gênero</label><select id="fGenero">${generos.map(([v,l])=>`<option value="${v}" ${filtroGenero===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Status</label><select id="fStatus">${status.map(([v,l])=>`<option value="${v}" ${filtroStatus===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Equipe</label><select id="fEquipe">${equipesOpts.map(([v,l])=>`<option value="${v}" ${filtroEquipe===v?'selected':''} style="${v!=='todas'?teamOptionStyle(v,null):''}">${escPdf(l)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Local</label><select id="fLocal">${locaisOpts.map(([v,l])=>`<option value="${escPdf(v)}" ${filtroLocal===v?'selected':''}>${escPdf(l)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Data</label><select id="fData">${datasOpts.map(([v,l])=>`<option value="${v}" ${filtroData===v?'selected':''}>${l}</option>`).join('')}</select></div>
     </div>
   </div>
+  ${locaisOpts.length<=1 && datasOpts.length<=1 ? `<p class="hint" style="margin:-8px 0 6px;">Assim que Local e Data forem preenchidos nas partidas (dentro de cada jogo), esses filtros passam a oferecer opções específicas.</p>` : ''}
   ${isAdmin ? `<div class="card">
     <h2>Adicionar jogo manualmente</h2>
     <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática.</p>
@@ -3226,12 +3234,14 @@ function renderJogos(){
 
   document.getElementById('main').innerHTML = html;
   if(isAdmin) bindAdicionarVariavelSumula();
-  ['fModalidade','fGenero','fStatus','fEquipe'].forEach(id=>{
+  ['fModalidade','fGenero','fStatus','fEquipe','fLocal','fData'].forEach(id=>{
     document.getElementById(id).addEventListener('change', (e)=>{
       if(id==='fModalidade') filtroModalidade=e.target.value;
       if(id==='fGenero') filtroGenero=e.target.value;
       if(id==='fStatus') filtroStatus=e.target.value;
       if(id==='fEquipe') filtroEquipe=e.target.value;
+      if(id==='fLocal') filtroLocal=e.target.value;
+      if(id==='fData') filtroData=e.target.value;
       renderGamesList();
     });
   });
@@ -3300,6 +3310,8 @@ function renderGamesList(){
     if(filtroModalidade!=='todas' && g.modalidade!==filtroModalidade) return false;
     if(filtroGenero!=='todos' && g.genero!==filtroGenero) return false;
     if(filtroEquipe!=='todas' && g.teamA!==filtroEquipe && g.teamB!==filtroEquipe) return false;
+    if(filtroLocal!=='todos' && (g.local||'')!==filtroLocal) return false;
+    if(filtroData!=='todas' && (g.data||'')!==filtroData) return false;
     const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
     if(filtroStatus==='pendente' && done) return false;
     if(filtroStatus==='feito' && !done) return false;
