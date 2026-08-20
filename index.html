@@ -108,6 +108,8 @@
   .game-row-panel .card{margin-bottom:0;}
   .badge{font-family:'Space Mono',monospace; font-size:10.5px; padding:2px 6px; border-radius:3px; background:var(--bg); color:var(--muted);}
   .badge.done{background:#E4F5EA; color:var(--green);}
+  .badge.live{background:#FDE8E8; color:var(--crimson); font-weight:700; animation:pulseLive 1.8s ease-in-out infinite;}
+  @keyframes pulseLive{0%,100%{opacity:1;} 50%{opacity:0.55;}}
 
   .pill-group{display:flex; gap:6px; flex-wrap:wrap;}
 
@@ -581,6 +583,21 @@
   <div class="modal-box" style="max-width:420px;">
     <p id="genericAlertMessage" style="white-space:pre-wrap; font-size:14px; color:var(--text); line-height:1.5; margin:6px 0 18px;"></p>
     <div class="modal-actions" id="genericAlertActions"></div>
+  </div>
+</div>
+
+<!-- "Grade do dia" -- visão de todos os jogos com Data+Hora+Local preenchidos, ordenados
+     por horário, pra ver de relance o que está acontecendo em cada quadra. Ver
+     openGradeDiaModal(). -->
+<div class="modal-overlay" id="gradeDiaModal">
+  <div class="modal-box" style="max-width:760px;">
+    <button class="modal-close" id="closeGradeDiaModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">Grade do Dia</h2>
+    <p class="hint">Todos os jogos com Data, Hora e Local preenchidos, ordenados por horário. Clique numa linha pra abrir aquele jogo diretamente.</p>
+    <div id="gradeDiaBody"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="btnImprimirGradeDia">🖨️ Exportar em PDF</button>
+    </div>
   </div>
 </div>
 
@@ -1465,6 +1482,19 @@ function buildAllGames(teams, modalidades){
 
 function nextGameId(){
   return (STATE.games.reduce((m,g)=>Math.max(m,g.id),0)) + 1;
+}
+
+/* Status de um jogo além do binário Pendente/Concluído: se Data+Hora já foram
+   preenchidas e o horário já passou, mas ainda não há placar/W.O. lançado, considera
+   "Ao vivo" -- ajuda quem está circulando entre partidas no dia do evento a diferenciar
+   "ainda nem começou" de "já devia ter começado". */
+function gameStatusInfo(g){
+  if(g.wo || (g.scoreA!=null && g.scoreB!=null)) return {status:'concluido', label:'Concluído'};
+  if(g.data && g.hora){
+    const inicio = new Date(`${g.data}T${g.hora}`);
+    if(!isNaN(inicio.getTime()) && inicio.getTime() <= Date.now()) return {status:'ao_vivo', label:'🔴 Ao vivo'};
+  }
+  return {status:'pendente', label:'Pendente'};
 }
 
 function regenerateMissingGames(){
@@ -3188,7 +3218,7 @@ function ngTeamOptionsHtml(genero){
 function renderJogos(){
   const modalidadesOpts = [['todas','Todas'], ...STATE.modalidades.map(m=>[m,m])];
   const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino']];
-  const status = [['todos','Todos'],['pendente','Pendentes'],['feito','Concluídos']];
+  const status = [['todos','Todos'],['pendente','Pendentes'],['ao_vivo','🔴 Ao vivo'],['feito','Concluídos']];
   const equipesOpts = [['todas','Todas'], ...STATE.teams.map(t=>[t.id, t.label])];
   // Local e Data são texto livre preenchido pelo admin em cada jogo (não uma lista fixa
   // como modalidade/equipe) — então as opções do filtro são montadas a partir do que já
@@ -3207,17 +3237,21 @@ function renderJogos(){
       <div class="field"><label class="f-label">Local</label><select id="fLocal">${locaisOpts.map(([v,l])=>`<option value="${escPdf(v)}" ${filtroLocal===v?'selected':''}>${escPdf(l)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Data</label><select id="fData">${datasOpts.map(([v,l])=>`<option value="${v}" ${filtroData===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="btnProximoPendente">⏭️ Próximo jogo pendente</button></div>
+      <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="btnGradeDia">📅 Grade do dia</button></div>
     </div>
   </div>
   ${locaisOpts.length<=1 && datasOpts.length<=1 ? `<p class="hint" style="margin:-8px 0 6px;">Assim que Local e Data forem preenchidos nas partidas (dentro de cada jogo), esses filtros passam a oferecer opções específicas.</p>` : ''}
   ${isAdmin ? `<div class="card">
     <h2>Adicionar jogo manualmente</h2>
-    <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes).</p>
+    <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes). Data/Hora/Local são opcionais aqui — dá pra preencher depois, dentro do jogo.</p>
     <div class="row">
       <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
       <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${ngTeamOptionsHtml('F')}</select></div>
       <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${ngTeamOptionsHtml('F')}</select></div>
+      <div class="field"><label class="f-label">Data</label><input type="date" id="ngData"></div>
+      <div class="field"><label class="f-label">Hora</label><input type="time" id="ngHora"></div>
+      <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Local</label><input type="text" id="ngLocal" placeholder="Quadra 1"></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
     </div>
   </div>
@@ -3266,6 +3300,7 @@ function renderJogos(){
     });
   });
   document.getElementById('btnProximoPendente').addEventListener('click', irParaProximoJogoPendente);
+  document.getElementById('btnGradeDia').addEventListener('click', openGradeDiaModal);
 
   if(isAdmin){
     document.getElementById('ngGenero').addEventListener('change', (e)=>{
@@ -3278,13 +3313,18 @@ function renderJogos(){
       const genero = document.getElementById('ngGenero').value;
       const teamA = document.getElementById('ngTeamA').value;
       const teamB = document.getElementById('ngTeamB').value;
+      const data = document.getElementById('ngData').value;
+      const hora = document.getElementById('ngHora').value;
+      const local = document.getElementById('ngLocal').value.trim();
       if(!teamA || !teamB || teamA===teamB){ showAlert('Escolha duas Equipes diferentes.'); return; }
       if(!modalidade){ showAlert('Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".'); return; }
       const elegiveis = teamsParaGenero(STATE.teams, genero).map(t=>t.id);
       if(!elegiveis.includes(teamA) || !elegiveis.includes(teamB)){ showAlert('Uma das Equipes escolhidas não participa dessa categoria de gênero (confira em Inscrições → Equipes).'); return; }
-      STATE.games.push({id:nextGameId(), modalidade, genero, teamA, teamB,
-        scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null});
+      const novoJogo = {id:nextGameId(), modalidade, genero, teamA, teamB,
+        scoreA:null, scoreB:null, wo:null, data, hora, local, fpA:null, fpB:null};
+      STATE.games.push(novoJogo);
       markDirty(); renderGamesList(); renderScoreboard();
+      verificarConflitoHorarioLocal(novoJogo);
     });
   }
 
@@ -3355,9 +3395,10 @@ function renderGamesList(){
     if(filtroEquipe!=='todas' && g.teamA!==filtroEquipe && g.teamB!==filtroEquipe) return false;
     if(filtroLocal!=='todos' && (g.local||'')!==filtroLocal) return false;
     if(filtroData!=='todas' && (g.data||'')!==filtroData) return false;
-    const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
-    if(filtroStatus==='pendente' && done) return false;
-    if(filtroStatus==='feito' && !done) return false;
+    const statusAtual = gameStatusInfo(g).status;
+    if(filtroStatus==='pendente' && statusAtual!=='pendente') return false;
+    if(filtroStatus==='ao_vivo' && statusAtual!=='ao_vivo') return false;
+    if(filtroStatus==='feito' && statusAtual!=='concluido') return false;
     return true;
   });
   const container = document.getElementById('gamesList');
@@ -3378,11 +3419,12 @@ function renderGamesList(){
 }
 
 /* Atalho "⏭️ Próximo jogo pendente" — ignora os filtros atuais (reseta pra "Todos" em
-   tudo, garantindo que o jogo encontrado fique visível), expande o primeiro jogo sem
-   placar/W.O. lançado e rola a tela até ele. Útil pra quem está circulando entre
-   partidas no dia do evento e só quer saber "qual é a próxima". */
+   tudo, garantindo que o jogo encontrado fique visível), e prioriza um jogo "🔴 Ao vivo"
+   (já devia ter começado) sobre um simplesmente pendente, expandindo e rolando a tela
+   até ele. Útil pra quem está circulando entre partidas no dia do evento. */
 function irParaProximoJogoPendente(){
-  const proximo = STATE.games.find(g => !(g.wo || (g.scoreA!=null && g.scoreB!=null)));
+  const naoConcluidos = STATE.games.filter(g => gameStatusInfo(g).status!=='concluido');
+  const proximo = naoConcluidos.find(g => gameStatusInfo(g).status==='ao_vivo') || naoConcluidos[0];
   if(!proximo){ showAlert('Não há jogos pendentes — todas as partidas já têm resultado ou W.O. lançado.'); return; }
   filtroModalidade='todas'; filtroGenero='todos'; filtroStatus='todos'; filtroEquipe='todas'; filtroLocal='todos'; filtroData='todas';
   expandedGameId = proximo.id;
@@ -3391,15 +3433,116 @@ function irParaProximoJogoPendente(){
   if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 
+/* Jogos com Data+Hora+Local todos preenchidos, ordenados por Data e depois Hora --
+   fonte compartilhada tanto pela "Grade do dia" na tela quanto pela versão em PDF. */
+function jogosComGradeOrdenados(){
+  return STATE.games.filter(g=> g.data && g.hora && g.local)
+    .slice().sort((a,b)=> (a.data+a.hora).localeCompare(b.data+b.hora));
+}
+
+function openGradeDiaModal(){
+  const jogos = jogosComGradeOrdenados();
+  const body = document.getElementById('gradeDiaBody');
+  if(jogos.length===0){
+    body.innerHTML = `<p class="hint">Nenhum jogo tem Data, Hora e Local preenchidos ainda — preencha esses campos dentro de cada partida (ou já no formulário de "Adicionar jogo manualmente") pra eles aparecerem aqui.</p>`;
+  } else {
+    body.innerHTML = `<div style="max-height:55vh; overflow:auto; border:1px solid var(--border); border-radius:6px;">
+      <table><thead><tr><th>Data</th><th>Hora</th><th>Local</th><th>Modalidade</th><th>Partida</th><th>Status</th></tr></thead><tbody>
+      ${jogos.map(g=>{
+        const statusInfo = gameStatusInfo(g);
+        return `<tr class="gradeDiaRow" data-id="${g.id}" style="cursor:pointer;">
+          <td class="mono">${g.data.split('-').reverse().join('/')}</td>
+          <td class="mono">${escPdf(g.hora)}</td>
+          <td>${escPdf(g.local)}</td>
+          <td>${escPdf(g.modalidade)} · ${g.genero==='F'?'Fem':'Masc'}</td>
+          <td>${teamChip(g.teamA, g.genero)} × ${teamChip(g.teamB, g.genero)}</td>
+          <td><span class="badge ${statusInfo.status==='concluido'?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span></td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>
+    </div>`;
+  }
+  document.getElementById('gradeDiaModal').classList.add('open');
+  document.querySelectorAll('.gradeDiaRow').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const id = Number(row.dataset.id);
+      closeGradeDiaModal();
+      filtroModalidade='todas'; filtroGenero='todos'; filtroStatus='todos'; filtroEquipe='todas'; filtroLocal='todos'; filtroData='todas';
+      expandedGameId = id;
+      renderJogos();
+      const el = document.querySelector(`.game-row[data-id="${id}"]`);
+      if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'});
+    });
+  });
+}
+function closeGradeDiaModal(){
+  document.getElementById('gradeDiaModal').classList.remove('open');
+}
+
+/* Reaproveita o mesmo padrão de exportação em PDF já usado na súmula (gerarSumulaPdf):
+   monta um HTML imprimível numa aba nova e aciona a janela de impressão do navegador. */
+function gerarGradeDiaPdf(){
+  const jogos = jogosComGradeOrdenados();
+  if(jogos.length===0){ showAlert('Nenhum jogo tem Data, Hora e Local preenchidos ainda — não há o que exportar.'); return; }
+  const linhas = jogos.map(g=>{
+    const statusInfo = gameStatusInfo(g);
+    const placar = statusInfo.status==='concluido' ? (g.wo ? 'W.O.' : `${g.scoreA??0} × ${g.scoreB??0}`) : '—';
+    return `<tr>
+      <td>${g.data.split('-').reverse().join('/')}</td>
+      <td>${escPdf(g.hora)}</td>
+      <td>${escPdf(g.local)}</td>
+      <td>${escPdf(g.modalidade)} — ${g.genero==='F'?'Feminino':'Masculino'}</td>
+      <td>${pdfTeamChip(g.teamA, g.genero)} × ${pdfTeamChip(g.teamB, g.genero)}</td>
+      <td style="text-align:center;">${placar}</td>
+      <td>${escPdf(statusInfo.label.replace('🔴 ',''))}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Grade do Dia — ${escPdf(STATE.eventName)}</title>
+<style>
+  @page{ size:A4 landscape; margin:14mm 12mm; }
+  *{box-sizing:border-box;}
+  body{font-family:Arial, Helvetica, sans-serif; color:#152033; margin:0; padding:0; font-size:12px;}
+  h1{font-size:18px; margin:0 0 4px;}
+  p.sub{color:#5B6B82; margin:0 0 16px; font-size:12px;}
+  table{width:100%; border-collapse:collapse;}
+  th,td{border:1px solid #DDE3EC; padding:6px 8px; text-align:left;}
+  th{background:#12213F; color:#fff;}
+</style>
+</head>
+<body>
+  <h1>Grade do Dia — ${escPdf(STATE.eventName)}</h1>
+  <p class="sub">Gerado em ${new Date().toLocaleString('pt-BR')} — ${jogos.length} partida${jogos.length===1?'':'s'} com horário definido.</p>
+  <table>
+    <thead><tr><th>Data</th><th>Hora</th><th>Local</th><th>Modalidade</th><th>Partida</th><th>Placar</th><th>Status</th></tr></thead>
+    <tbody>${linhas}</tbody>
+  </table>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if(!win){ showAlert('Não foi possível abrir a janela de impressão. Verifique se o navegador não está bloqueando pop-ups.'); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ win.print(); }, 300);
+}
+
 /* Uma linha compacta por jogo: modalidade, gênero e as duas Equipes já dão pra localizar
    o jogo certo numa lista longa sem precisar abrir nada. Clicar em qualquer parte da
    linha (fora do botão "Remover") expande/recolhe o painel completo — placar, W.O.,
    Jogo Limpo, súmula inteira — logo abaixo, dentro do mesmo card (ver
    buildGameDetailHtml). Só um jogo fica expandido por vez. */
 function gameRowHtml(g){
-  const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
+  const statusInfo = gameStatusInfo(g);
+  const done = statusInfo.status==='concluido';
   const nLancamentos = (STATE.sumulas[g.id]?.eventos||[]).length;
-  const placarTxt = g.wo ? (g.wo==='A' ? 'W.O.' : 'W.O.') : (done ? `${g.scoreA??0} × ${g.scoreB??0}` : 'vs');
+  const placarTxt = g.wo ? 'W.O.' : (done ? `${g.scoreA??0} × ${g.scoreB??0}` : 'vs');
   const expanded = expandedGameId===g.id;
   return `<div class="game-card game-row" data-id="${g.id}">
     <div class="game-row-summary" style="cursor:pointer;">
@@ -3409,8 +3552,9 @@ function gameRowHtml(g){
       </div>
       <div class="game-row-meta">
         ${g.data ? `<span class="hint mono" style="margin:0;">${g.data.split('-').reverse().join('/')}${g.hora?(' '+g.hora):''}</span>` : ''}
+        ${g.local ? `<span class="hint" style="margin:0;">📍 ${escPdf(g.local)}</span>` : ''}
         ${nLancamentos>0 ? `<span class="badge">${nLancamentos} lanç.</span>` : ''}
-        <span class="badge ${done?'done':''}">${done?'Concluído':'Pendente'}</span>
+        <span class="badge ${done?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span>
         ${isAdmin?'<button class="btn danger small removeGame" title="Remover partida">✕</button>':''}
         <span class="expand-chevron">${expanded?'▾':'▸'}</span>
       </div>
@@ -6815,11 +6959,16 @@ function wireGameDetailPanelEvents(gameId, panelEl){
     btn.addEventListener('click', ()=>{
       const evId = Number(btn.closest('tr').dataset.evid);
       const eventoRemovido = sumula.eventos.find(e=>e.id===evId);
-      sumula.eventos = sumula.eventos.filter(e=>e.id!==evId);
-      recomputarPlacarSumula(game);
-      markDirty();
-      if(eventoRemovido) syncEnviarDelecaoImediata('sumula_evento', evId, {...eventoRemovido, gameId});
-      renderScoreboard(); rerender();
+      if(!eventoRemovido) return;
+      const inscrito = STATE.inscritos.find(a=>a.id===eventoRemovido.studentId);
+      const label = tipoInfo(eventoRemovido.tipo, game.modalidade).label;
+      showConfirm(`Remover o lançamento "${label}" de ${inscrito?escPdf(inscrito.nome):'inscrito removido'}? Se esse tipo contar ponto, o placar é recalculado automaticamente ao remover.`, ()=>{
+        sumula.eventos = sumula.eventos.filter(e=>e.id!==evId);
+        recomputarPlacarSumula(game);
+        markDirty();
+        syncEnviarDelecaoImediata('sumula_evento', evId, {...eventoRemovido, gameId});
+        renderScoreboard(); rerender();
+      });
     });
   });
 }
@@ -7822,6 +7971,9 @@ function renderViewOnlyBanner(){
   document.getElementById('cancelImportReviewBtn').addEventListener('click', closeImportReviewModal);
   document.getElementById('confirmImportReviewBtn').addEventListener('click', confirmImportReview);
   document.getElementById('importReviewModal').addEventListener('click', (e)=>{ if(e.target.id==='importReviewModal') closeImportReviewModal(); });
+  document.getElementById('closeGradeDiaModal').addEventListener('click', closeGradeDiaModal);
+  document.getElementById('gradeDiaModal').addEventListener('click', (e)=>{ if(e.target.id==='gradeDiaModal') closeGradeDiaModal(); });
+  document.getElementById('btnImprimirGradeDia').addEventListener('click', gerarGradeDiaPdf);
   document.getElementById('closeCrachaResultModal').addEventListener('click', closeCrachaResultModal);
   document.getElementById('closeCrachaResultBtn2').addEventListener('click', closeCrachaResultModal);
   document.getElementById('crachaResultModal').addEventListener('click', (e)=>{ if(e.target.id==='crachaResultModal') closeCrachaResultModal(); });
