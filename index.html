@@ -4461,6 +4461,9 @@ function renderEquipesContentHtml(){
    Individuais (colocação geral, com opção de virar coletiva no momento da criação — ver
    renderIndividualContentHtml) e Artísticas (apresentações vinculadas a um inscrito). O botão
    "Gerar jogos" fica aqui também, já que ele depende diretamente das modalidades coletivas. */
+let modIndividuaisAberto = false; // "Modalidades Individuais" e "Artísticas" ficam
+let modArtisticasAberto = false;  // recolhidas por padrão -- mesmo padrão já usado na aba Jogos
+
 function renderModalidadesContentHtml(){
   return `<div class="card">
     <h2>Modalidades Coletivas</h2>
@@ -4472,15 +4475,17 @@ function renderModalidadesContentHtml(){
     <div id="modalidadesChips" style="margin-top:10px;"></div>
   </div>
 
-  ${renderIndividualContentHtml()}
-
-  ${renderModalidadesArtisticasContentHtml()}
-
   <div class="card">${isAdmin ? `<h2>Gerar jogos</h2>
     <p class="hint">Depois de adicionar Equipes ou modalidades novas, clique aqui para gerar automaticamente as partidas que ainda faltam — cada equipe joga contra todas as outras. Resultados já lançados não são apagados.</p>
     <button class="btn" id="btnRegen">🔄 Gerar/atualizar jogos automaticamente</button>
     <span id="regenMsg" class="hint" style="margin-left:10px;"></span>` : `<h2>Gerar jogos</h2><p class="hint">Faça login como administrador para gerar partidas automaticamente.</p>`}
-  </div>`;
+  </div>
+
+  <button class="toggle-section-btn" id="btnToggleModIndividuais">${modIndividuaisAberto?'▾':'▸'} Modalidades Individuais</button>
+  <div style="${modIndividuaisAberto?'':'display:none;'} margin-top:10px;">${renderIndividualContentHtml()}</div>
+
+  <button class="toggle-section-btn" id="btnToggleModArtisticas" style="margin-top:10px;">${modArtisticasAberto?'▾':'▸'} Modalidades Artísticas</button>
+  <div style="${modArtisticasAberto?'':'display:none;'} margin-top:10px;">${renderModalidadesArtisticasContentHtml()}</div>`;
 }
 function bindEquipesEvents(){
   if(isAdmin){
@@ -4516,6 +4521,8 @@ function bindEquipesEvents(){
 function bindModalidadesContentEvents(){
   bindIndividualEvents();
   renderIndivTable();
+  document.getElementById('btnToggleModIndividuais').addEventListener('click', ()=>{ modIndividuaisAberto=!modIndividuaisAberto; renderInscricoes(); });
+  document.getElementById('btnToggleModArtisticas').addEventListener('click', ()=>{ modArtisticasAberto=!modArtisticasAberto; renderInscricoes(); });
   if(isAdmin){
     document.getElementById('nmAdd').addEventListener('click', ()=>{
       const name = document.getElementById('nmName').value.trim();
@@ -4639,6 +4646,7 @@ function renderModalidadesChips(){
 let inscritoFiltroequipe = 'todas';
 let inscritoFiltroModalidade = 'todas';
 let inscritoFiltroGenero = 'todos';
+let inscritoFiltroTexto = '';
 let inscritosModoCadastro = 'importar'; // 'importar' | 'manual'
 
 /* ----- Modal de foto do inscrito (upload de arquivo ou captura por webcam) ----- */
@@ -5119,6 +5127,73 @@ async function gerarCrachaInscrito(inscritoId, btnEl){
 }
 function closeCrachaResultModal(){ document.getElementById('crachaResultModal').classList.remove('open'); }
 
+/* Gera os crachás de vários inscritos de uma vez — antes só dava pra gerar um por um,
+   o que virava centenas de cliques repetidos numa escola grande. Usa a mesma
+   crachaDesenharNoCanvas() de sempre, um crachá por vez (pra não travar o navegador
+   desenhando tudo ao mesmo tempo), e monta uma folha pra impressão (2 por linha, do
+   tamanho real do crachá — 10×14cm) em vez de baixar cada imagem separada, já que o
+   objetivo prático é imprimir e recortar. Respeita os filtros já aplicados na lista
+   (equipe/modalidade/gênero/busca), então dá pra gerar só de uma Equipe por vez também. */
+async function gerarCrachasLote(){
+  const lista = filteredInscritos();
+  if(lista.length===0){ showAlert('Nenhum inscrito encontrado com os filtros atuais da lista.'); return; }
+  const semFoto = lista.filter(a=>!a.foto).length;
+  showConfirm(`Gerar crachás de ${lista.length} inscrito${lista.length===1?'':'s'} (considerando os filtros aplicados agora na lista)? Isso pode levar alguns segundos.${semFoto?` ${semFoto} não tem foto cadastrada e vai aparecer sem imagem no crachá.`:''}`, ()=>{
+    executarGeracaoCrachasLote(lista);
+  });
+}
+async function executarGeracaoCrachasLote(lista){
+  const btn = document.getElementById('alGerarCrachasLote');
+  const textoOriginal = btn ? btn.textContent : '';
+  if(btn) btn.disabled = true;
+  try{
+    const imagens = [];
+    for(let i=0;i<lista.length;i++){
+      const inscrito = lista[i];
+      if(btn) btn.textContent = `Gerando ${i+1}/${lista.length}...`;
+      const canvas = document.createElement('canvas');
+      await crachaDesenharNoCanvas(canvas, 300, {
+        logo1Src: imgGet(STATE.crachaLogos.logo1),
+        logo2Src: imgGet(STATE.crachaLogos.logo2),
+        fotoSrc: imgGet(inscrito.foto),
+        cfg: STATE.crachaConfig,
+        corFaixa: teamColor(inscrito.teamId, inscrito.genero),
+        nome: inscrito.nome,
+        codigo: inscrito.codigo || String(inscrito.id)
+      });
+      imagens.push(canvas.toDataURL('image/png'));
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Crachás — ${escPdf(STATE.eventName)}</title>
+<style>
+  @page{ size:A4; margin:10mm; }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:Arial, Helvetica, sans-serif;}
+  .grade{display:grid; grid-template-columns:repeat(2, 10cm); gap:4mm; justify-content:center;}
+  .grade img{width:10cm; height:14cm; object-fit:contain; page-break-inside:avoid; border:1px dashed #ccc;}
+</style>
+</head>
+<body>
+  <div class="grade">${imagens.map(src=>`<img src="${src}">`).join('')}</div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if(!win){ showAlert('Não foi possível abrir a janela de impressão. Verifique se o navegador não está bloqueando pop-ups.'); return; }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(()=>{ win.print(); }, 400);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = textoOriginal || '🪪 Gerar crachás em lote'; }
+  }
+}
+
 /* ===================== PRÉ-VISUALIZAÇÃO AO VIVO DO CRACHÁ =====================
    Duas telas usam o mesmo motor de desenho (crachaDesenharNoCanvas) para mostrar uma
    prévia com dados fictícios (nome, código e a cor da primeira equipe cadastrada), já
@@ -5241,6 +5316,7 @@ function renderInscritosContentHtml(){
   <div class="card">
     <h2>Lista de Inscritos</h2>
     <div class="row" style="margin-bottom:10px;">
+      <div class="field" style="flex:1; min-width:180px;"><label class="f-label">Buscar por nome ou código</label><input type="text" id="alBuscaTexto" placeholder="Ex.: Maria ou a3b7c1d9" value="${escPdf(inscritoFiltroTexto)}"></div>
       <div class="field"><label class="f-label">Filtrar por equipe</label><select id="alFiltroequipe">
         <option value="todas">Todas as Equipes</option>
         ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${inscritoFiltroequipe===t.id?'selected':''}>${escPdf(t.label)}</option>`).join('')}
@@ -5255,6 +5331,7 @@ function renderInscritosContentHtml(){
         <option value="M" ${inscritoFiltroGenero==='M'?'selected':''}>Masculino</option>
       </select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="alExport">⬇️ Exportar lista (CSV)</button></div>
+      ${isAdmin ? `<div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="alGerarCrachasLote">🪪 Gerar crachás em lote</button></div>` : ''}
     </div>
     <table><thead><tr><th>Foto</th><th>Nome</th><th>equipe</th><th>Gênero</th><th>Código</th><th>Restrição alimentar</th><th>Alergia a medicamento</th><th>Modalidades</th><th>Crachá</th><th></th><th></th></tr></thead><tbody id="inscritosBody"></tbody></table>
   </div>`;
@@ -5270,9 +5347,11 @@ function bindInscritosEvents(){
   });
 
   document.getElementById('alFiltroGenero').addEventListener('change', (e)=>{ inscritoFiltroGenero=e.target.value; renderInscritosBody(); });
+  document.getElementById('alBuscaTexto').addEventListener('input', (e)=>{ inscritoFiltroTexto=e.target.value; renderInscritosBody(); });
   document.getElementById('alFiltroequipe').addEventListener('change', (e)=>{ inscritoFiltroequipe=e.target.value; renderInscritosBody(); });
   document.getElementById('alFiltroMod').addEventListener('change', (e)=>{ inscritoFiltroModalidade=e.target.value; renderInscritosBody(); });
   document.getElementById('alExport').addEventListener('click', exportInscritosCSV);
+  if(isAdmin) document.getElementById('alGerarCrachasLote').addEventListener('click', gerarCrachasLote);
 
   // ----- Painel "Cadastro manual" (só existe no DOM quando esse modo está ativo) -----
   const alTemRestricao = document.getElementById('alTemRestricao');
@@ -5339,10 +5418,12 @@ function bindInscritosEvents(){
 }
 
 function filteredInscritos(){
+  const texto = normalizeSearchText(inscritoFiltroTexto.trim());
   return STATE.inscritos.filter(a=>{
     if(inscritoFiltroequipe!=='todas' && a.teamId!==inscritoFiltroequipe) return false;
     if(inscritoFiltroModalidade!=='todas' && !(a.modalidades||[]).includes(inscritoFiltroModalidade)) return false;
     if(inscritoFiltroGenero!=='todos' && a.genero!==inscritoFiltroGenero) return false;
+    if(texto && !normalizeSearchText(a.nome).includes(texto) && !normalizeSearchText(a.codigo||'').includes(texto)) return false;
     return true;
   });
 }
