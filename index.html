@@ -3658,17 +3658,20 @@ let gtReagendarGameId = null;
    gerarTabelaConfrontos), mas que ainda pode acontecer se alguém reagendar manualmente um
    confronto para um horário que colide com outro já existente. Retorna o conjunto de IDs
    dos jogos envolvidos em algum conflito, para sinalizar na grade. */
+/* Mesma regra de gtTeamTemConflito() (fonte única — ver comentário lá) aplicada a cada
+   jogo já programado, pra marcar quais aparecem com borda vermelha na grade e entram na
+   contagem "X confrontos em choque" do resumo. Antes só pegava horário EXATAMENTE
+   igual — não sabia da margem de deslocamento entre locais diferentes. */
 function gtDetectarConflitos(){
-  const contagem = {};
+  const conflitos = new Set();
   STATE.games.forEach(g=>{
     if(!g.data || !g.hora) return;
-    [g.teamA, g.teamB].forEach(tid=>{
-      const chave = `${tid}|${g.data}|${g.hora}`;
-      (contagem[chave] = contagem[chave]||[]).push(g.id);
-    });
+    const duracao = gtDuracaoDoLocalPorNome(g.local);
+    if(gtTeamTemConflito(g.teamA, g.data, g.hora, g.local, duracao, g.id) ||
+       gtTeamTemConflito(g.teamB, g.data, g.hora, g.local, duracao, g.id)){
+      conflitos.add(g.id);
+    }
   });
-  const conflitos = new Set();
-  Object.values(contagem).forEach(ids=>{ if(ids.length>1) ids.forEach(id=>conflitos.add(id)); });
   return conflitos;
 }
 
@@ -4034,10 +4037,13 @@ function closeGtReagendarModal(){
   document.getElementById('gtReagendarModal').classList.remove('open');
   gtReagendarGameId = null;
 }
-/* Checa DOIS tipos de conflito ao reagendar manualmente — antes só checava equipe
-   (a aba Jogos, em verificarConflitoHorarioLocal(), já checava local há um tempo, mas
-   esse modal específico do Gerador de Tabela tinha ficado pra trás; agora os dois
-   caminhos avisam da mesma forma). */
+/* Checa DOIS tipos de conflito ao reagendar manualmente:
+   - conflito de Equipe: agora usa gtTeamTemConflito() — a mesma fonte única usada na
+     geração automática e no indicador da grade, já com a margem de deslocamento entre
+     locais diferentes (STATE.geradorTabela.tempoDeslocamento) embutida.
+   - conflito de local: continua uma checagem à parte, já que é um cenário diferente
+     (duas partidas OCUPANDO O MESMO ESPAÇO ao mesmo tempo, mesmo com equipes diferentes
+     — nada a ver com deslocamento de equipe). */
 function atualizarGtReagendarConflitoAviso(){
   const g = STATE.games.find(x=>x.id===gtReagendarGameId);
   const avisoEl = document.getElementById('gtrConflitoAviso');
@@ -4046,11 +4052,11 @@ function atualizarGtReagendarConflitoAviso(){
   const hora = document.getElementById('gtrHora').value;
   const local = document.getElementById('gtrLocal').value.trim();
   if(!data || !hora){ avisoEl.style.display='none'; return; }
-  const conflitoEquipe = STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora &&
-    (x.teamA===g.teamA || x.teamB===g.teamA || x.teamA===g.teamB || x.teamB===g.teamB));
+  const duracao = gtDuracaoDoLocalPorNome(local);
+  const conflitoEquipe = gtTeamTemConflito(g.teamA, data, hora, local, duracao, g.id) || gtTeamTemConflito(g.teamB, data, hora, local, duracao, g.id);
   const conflitoLocal = !!local && STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora && x.local===local);
   const avisos = [];
-  if(conflitoEquipe) avisos.push('uma das Equipes desse confronto já tem outro jogo nesse mesmo dia e horário');
+  if(conflitoEquipe) avisos.push('uma das Equipes desse confronto fica sem tempo suficiente até (ou desde) outro jogo que já tem marcado nesse dia — considerando a margem de deslocamento configurada, se os locais forem diferentes');
   if(conflitoLocal) avisos.push('esse local já tem outro confronto marcado nesse mesmo dia e horário');
   if(avisos.length){
     avisoEl.textContent = '⚠️ Atenção: ' + avisos.join('; e ') + '.';
@@ -4120,6 +4126,40 @@ function gtDuracaoDoLocalPorNome(nome){
   return local ? (Number(local.duracaoJogo)||0) : 0;
 }
 
+/* Fonte única da regra "essa Equipe consegue cumprir esse horário?" — usada tanto na
+   geração automática (gerarTabelaConfrontos) quanto no indicador de conflito da grade
+   (gtDetectarConflitos, a borda vermelha nos cards + o resumo "X confrontos em choque")
+   e no aviso do modal "Reagendar" (atualizarGtReagendarConflitoAviso). Antes, cada um
+   desses três lugares checava conflito à sua própria maneira — só a geração automática
+   sabia da margem de deslocamento entre locais diferentes; reagendar manualmente pra um
+   horário que violava essa mesma margem passava batido, sem aviso nenhum e sem marcar
+   nada na grade depois. Agora os três usam exatamente esta função.
+
+   Verifica se a Equipe `teamId`, jogando em `local` às `hora` do dia `data` (por
+   `duracaoMin` minutos), colide com ALGUM outro jogo já existente dessa mesma Equipe em
+   STATE.games — seja por sobreposição real de horário, seja por não ter a margem de
+   deslocamento configurada (STATE.geradorTabela.tempoDeslocamento) quando o outro jogo é
+   em local diferente. `gameIdExcluir` evita comparar um jogo com ele mesmo. */
+function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir){
+  if(!teamId || !data || !hora) return false;
+  const inicio = gtTimeToMin(hora);
+  if(inicio==null) return false;
+  const fim = inicio + (Number(duracaoMin)||0);
+  const tempoDeslocamento = Math.max(0, Number(STATE.geradorTabela.tempoDeslocamento)||0);
+  return STATE.games.some(g=>{
+    if(g.id===gameIdExcluir) return false;
+    if(g.teamA!==teamId && g.teamB!==teamId) return false;
+    if(g.data!==data || !g.hora) return false;
+    const outroInicio = gtTimeToMin(g.hora);
+    if(outroInicio==null) return false;
+    const outroFim = outroInicio + gtDuracaoDoLocalPorNome(g.local);
+    const margem = (g.local===local) ? 0 : tempoDeslocamento;
+    // "gap" entre os dois intervalos: negativo/zero quando há sobreposição real
+    const gap = inicio>=outroFim ? (inicio-outroFim) : (outroInicio>=fim ? (outroInicio-fim) : -1);
+    return gap < margem;
+  });
+}
+
 function gerarTabelaConfrontos(sobrescrever){
   const locais = STATE.geradorTabela.locais.filter(l=> l.horaInicio && gtOcupacaoTotal(l)>0);
   if(!locais.length) return {erro:'Cadastre pelo menos um local com horário de início e tempo de ocupação (jogo + intervalo) definidos.'};
@@ -4135,44 +4175,10 @@ function gerarTabelaConfrontos(sobrescrever){
   let candidatos = STATE.games.filter(g=> porModalidade[g.modalidade] && (sobrescrever || !g.hora));
   candidatos.sort((a,b)=> (a.modalidade+a.genero).localeCompare(b.modalidade+b.genero) || a.id-b.id);
 
-  const tempoDeslocamento = Math.max(0, Number(STATE.geradorTabela.tempoDeslocamento)||0);
-
-  /* Ocupação de cada Equipe por dia, em QUALQUER local — usada para nunca escalar a mesma
-     Equipe em dois confrontos que colidam no tempo. Guarda o intervalo [início, fim] real
-     de cada confronto (não só o horário de início), porque um confronto ocupa a Equipe
-     durante toda a sua duração, não num instante só. Com dois confrontos em locais
-     DIFERENTES, também exige pelo menos `tempoDeslocamento` minutos de intervalo entre o
-     fim de um e o início do outro — sem isso, "20 minutos depois, numa quadra do outro
-     lado" passava despercebido mesmo sendo, na prática, impossível de cumprir. Começa já
-     marcando os confrontos que não serão remarcados nesta geração (para respeitar
-     horários fixados manualmente também). */
-  const ocupTeam = {}; // teamId -> [{data, inicio, fim, local}]
-  const marcarOcupado = (teamId, data, hora, local, duracao)=>{
-    if(!teamId || !data || !hora) return;
-    const inicio = gtTimeToMin(hora);
-    if(inicio==null) return;
-    (ocupTeam[teamId] = ocupTeam[teamId]||[]).push({data, inicio, fim: inicio+(Number(duracao)||0), local});
-  };
-  const conflitaComDeslocamento = (teamId, data, hora, local, duracao)=>{
-    if(!teamId || !data || !hora) return false;
-    const inicio = gtTimeToMin(hora);
-    if(inicio==null) return false;
-    const fim = inicio + (Number(duracao)||0);
-    return (ocupTeam[teamId]||[]).some(ocup=>{
-      if(ocup.data !== data) return false;
-      const margem = (ocup.local===local) ? 0 : tempoDeslocamento;
-      // "gap" entre os dois intervalos: negativo/zero quando ha sobreposicao real
-      const gap = inicio>=ocup.fim ? (inicio-ocup.fim) : (ocup.inicio>=fim ? (ocup.inicio-fim) : -1);
-      return gap < margem;
-    });
-  };
-  STATE.games.forEach(g=>{
-    if(g.hora && g.data && !candidatos.includes(g)){
-      const duracaoExistente = gtDuracaoDoLocalPorNome(g.local);
-      marcarOcupado(g.teamA, g.data, g.hora, g.local, duracaoExistente);
-      marcarOcupado(g.teamB, g.data, g.hora, g.local, duracaoExistente);
-    }
-  });
+  // Ao sobrescrever, os candidatos já têm hora/local de uma geração anterior — precisa
+  // limpar ANTES de começar a alocar, senão gtTeamTemConflito() ainda os enxergaria com
+  // o horário antigo ao checar conflito para os próximos candidatos da mesma leva.
+  if(sobrescrever) candidatos.forEach(g=>{ g.hora=''; g.local=''; });
 
   let agendados=0, semEspaco=0, conflitosEvitados=0;
   const ponteiro = {};
@@ -4187,7 +4193,7 @@ function gerarTabelaConfrontos(sobrescrever){
       // Pula slots em que a Equipe A ou a Equipe B já têm outro confronto que colide
       // (mesmo horário, ou deslocamento insuficiente entre locais diferentes)
       let tentativasSlot = 0;
-      while(slot && (conflitaComDeslocamento(g.teamA, slot.data, slot.hora, local.nome, local.duracaoJogo) || conflitaComDeslocamento(g.teamB, slot.data, slot.hora, local.nome, local.duracaoJogo)) && tentativasSlot < 400){
+      while(slot && (gtTeamTemConflito(g.teamA, slot.data, slot.hora, local.nome, local.duracaoJogo, g.id) || gtTeamTemConflito(g.teamB, slot.data, slot.hora, local.nome, local.duracaoJogo, g.id)) && tentativasSlot < 400){
         conflitosEvitados++;
         slot = gtProximoSlot(local, estados[local.id]);
         tentativasSlot++;
@@ -4196,8 +4202,6 @@ function gerarTabelaConfrontos(sobrescrever){
       g.hora = slot.hora;
       g.local = local.nome;
       if(slot.data) g.data = slot.data;
-      marcarOcupado(g.teamA, slot.data, slot.hora, local.nome, local.duracaoJogo);
-      marcarOcupado(g.teamB, slot.data, slot.hora, local.nome, local.duracaoJogo);
       syncMarcarSujoGame(g.id);
       agendados++; alocado = true;
       break;
