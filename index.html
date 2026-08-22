@@ -6457,14 +6457,22 @@ function resolverInscritoBuscavelComValor(valorDigitado, inputId, hiddenId){
 
 function pratosParaEvitar(inscrito, dataRegistro){
   if(!inscrito.restricaoAlimentar || !inscrito.restricoesAlimentares) return [];
-  const restricoes = inscrito.restricoesAlimentares.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  // Compara ignorando acento e maiúscula/minúscula (normalizeSearchText, já usada em
+  // outras buscas do app) -- antes só usava toLowerCase(), então uma restrição digitada
+  // como "acucar" (sem acento, bem comum de acontecer) não batia com "açúcar" no
+  // cardápio, e o sistema mostrava "nenhum prato a evitar" mesmo quando havia. O texto
+  // ORIGINAL (com acento, como foi digitado) continua sendo o que aparece pro usuário.
+  const restricoes = inscrito.restricoesAlimentares.split(',').map(s=>s.trim()).filter(Boolean);
   const matches = [];
   STATE.cardapio.filter(c=> c.data===dataRegistro).forEach(c=>{
-    const itensList = (c.itens||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+    const itensList = (c.itens||'').split(',').map(s=>s.trim()).filter(Boolean);
     restricoes.forEach(r=>{
+      const rNorm = normalizeSearchText(r);
+      if(!rNorm) return;
       itensList.forEach(item=>{
-        if(!item || !r) return;
-        if(item.includes(r) || r.includes(item)){
+        const itemNorm = normalizeSearchText(item);
+        if(!itemNorm) return;
+        if(itemNorm.includes(rNorm) || rNorm.includes(itemNorm)){
           matches.push({prato:c.prato, item, restricao:r});
         }
       });
@@ -6494,6 +6502,23 @@ function registrarAlimentacaoComValor(valorDigitado, origemInputId){
     return false;
   }
   const inscrito = result.inscrito;
+  // Avisa (sem travar) se esse inscrito já foi registrado hoje -- antes escanear o mesmo
+  // crachá duas vezes por engano (comum numa fila de refeição corrida) criava dois
+  // registros em silêncio, sem nenhum aviso.
+  const hojeStr = toDateStr(new Date());
+  const jaRegistradoHoje = STATE.checkins.find(c=> c.studentId===inscrito.id && toDateStr(new Date(c.ts))===hojeStr);
+  if(jaRegistradoHoje){
+    const horaAnterior = new Date(jaRegistradoHoje.ts).toLocaleTimeString('pt-BR');
+    showConfirm(`${inscrito.nome} já foi registrado hoje às ${horaAnterior}. Registrar de novo mesmo assim?`, ()=>{
+      finalizarRegistroAlimentacao(inscrito, origemInputId);
+    });
+    if(origemInputId){ const el = document.getElementById(origemInputId); if(el) el.value=''; }
+    return true; // já tratou o pedido (abriu a confirmação) -- os chamadores (scanner/Enter) tratam isso como sucesso
+  }
+  finalizarRegistroAlimentacao(inscrito, origemInputId);
+  return true;
+}
+function finalizarRegistroAlimentacao(inscrito, origemInputId){
   const ts = Date.now();
   const novoCheckin = {id:nextCheckinId(), studentId:inscrito.id, ts};
   STATE.checkins.push(novoCheckin);
@@ -6520,7 +6545,6 @@ function registrarAlimentacaoComValor(valorDigitado, origemInputId){
     }
   }
   openFeedingModal(modalHtml);
-  return true;
 }
 
 function registrarAlimentacao(){
@@ -6674,6 +6698,7 @@ function renderAlimentacao(){
 
   <div class="card">
     <h2>Registros de Alimentação</h2>
+    <p class="hint" id="alimentacaoContador" style="font-weight:600; color:var(--navy);"></p>
     <p class="hint">Mostrando os 10 registros mais recentes que atendem ao filtro selecionado.</p>
     <div class="row" style="margin-bottom:10px;">
       <div class="field"><label class="f-label">Filtrar por equipe</label><select id="checkinFiltroequipe">
@@ -6761,6 +6786,12 @@ function renderCardapioBody(){
 function renderCheckinsBody(){
   const body = document.getElementById('checkinsBody');
   if(!body) return;
+  const contadorEl = document.getElementById('alimentacaoContador');
+  if(contadorEl){
+    const hojeStr = toDateStr(new Date());
+    const totalHoje = STATE.checkins.filter(c=> toDateStr(new Date(c.ts))===hojeStr).length;
+    contadorEl.textContent = `🍽️ ${totalHoje} ${totalHoje===1?'refeição registrada':'refeições registradas'} hoje (${new Date().toLocaleDateString('pt-BR')}).`;
+  }
   let list = STATE.checkins.slice().sort((a,b)=> b.ts-a.ts);
   if(checkinFiltroequipe!=='todas'){
     list = list.filter(c=>{
