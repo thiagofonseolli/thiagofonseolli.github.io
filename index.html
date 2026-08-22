@@ -4160,6 +4160,16 @@ function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir)
   });
 }
 
+/* Calcula, sem alterar nada, quantos confrontos entrariam na leva de (re)agendamento e
+   quantos concluídos ficariam de fora por já terem resultado — usado só pra montar a
+   mensagem de confirmação antes de rodar de verdade com "sobrescrever" marcado. */
+function gtPreviaGeracao(sobrescrever){
+  const porModalidade = {};
+  STATE.geradorTabela.locais.forEach(l=> l.modalidades.forEach(m=>{ (porModalidade[m] = porModalidade[m]||[]).push(l); }));
+  const candidatos = STATE.games.filter(g=> porModalidade[g.modalidade] && gameStatusInfo(g).status!=='concluido' && (sobrescrever || !g.hora)).length;
+  const protegidos = sobrescrever ? STATE.games.filter(g=> porModalidade[g.modalidade] && gameStatusInfo(g).status==='concluido' && g.hora).length : 0;
+  return {candidatos, protegidos};
+}
 function gerarTabelaConfrontos(sobrescrever){
   const locais = STATE.geradorTabela.locais.filter(l=> l.horaInicio && gtOcupacaoTotal(l)>0);
   if(!locais.length) return {erro:'Cadastre pelo menos um local com horário de início e tempo de ocupação (jogo + intervalo) definidos.'};
@@ -4172,8 +4182,16 @@ function gerarTabelaConfrontos(sobrescrever){
 
   if(Object.keys(porModalidade).length===0) return {erro:'Marque ao menos uma modalidade em algum local antes de gerar a tabela.'};
 
-  let candidatos = STATE.games.filter(g=> porModalidade[g.modalidade] && (sobrescrever || !g.hora));
+  let candidatos = STATE.games.filter(g=> porModalidade[g.modalidade] && gameStatusInfo(g).status!=='concluido' && (sobrescrever || !g.hora));
   candidatos.sort((a,b)=> (a.modalidade+a.genero).localeCompare(b.modalidade+b.genero) || a.id-b.id);
+
+  // Jogos já CONCLUÍDOS (com placar ou W.O. lançado) nunca entram nos candidatos, nem
+  // com "sobrescrever" marcado — o resultado já aconteceu num Local/Data/Hora reais;
+  // reagendar isso só pra abrir espaço pra jogos novos deixaria o registro incoerente
+  // com o que de fato ocorreu. `protegidos` conta quantos concluídos JÁ TINHAM
+  // horário marcado e teriam entrado na leva de sobrescrita antes desta proteção — só
+  // pra informar o admin, no resumo, que eles ficaram de fora por esse motivo.
+  const protegidos = sobrescrever ? STATE.games.filter(g=> porModalidade[g.modalidade] && gameStatusInfo(g).status==='concluido' && g.hora).length : 0;
 
   // Ao sobrescrever, os candidatos já têm hora/local de uma geração anterior — precisa
   // limpar ANTES de começar a alocar, senão gtTeamTemConflito() ainda os enxergaria com
@@ -4210,7 +4228,7 @@ function gerarTabelaConfrontos(sobrescrever){
     if(!alocado) semEspaco++;
   });
 
-  return {agendados, semEspaco, conflitosEvitados};
+  return {agendados, semEspaco, conflitosEvitados, protegidos};
 }
 
 function bindGeradorTabelaEvents(){
@@ -4354,17 +4372,32 @@ function bindGeradorTabelaEvents(){
     const gerarBtn = document.getElementById('gtGerarTabela');
     if(gerarBtn) gerarBtn.addEventListener('click', ()=>{
       const sobre = document.getElementById('gtSobrescrever').checked;
-      const res = gerarTabelaConfrontos(sobre);
-      if(res.erro){
-        gtUltimoResultadoMsg = '⚠️ '+res.erro;
-      }else{
-        markDirty();
-        let msg = `✅ ${res.agendados} confronto(s) programado(s).`;
-        if(res.conflitosEvitados>0) msg += ` 🛡️ ${res.conflitosEvitados} tentativa(s) de horário evitada(s) por colidir com outra Equipe já escalada naquele dia/hora (mesmo local ou deslocamento insuficiente entre locais).`;
-        if(res.semEspaco>0) msg += ` ⚠️ ${res.semEspaco} confronto(s) não couberam em nenhum local compatível — aumente o horário de término, adicione mais locais/dias ou marque mais modalidades para esses locais.`;
-        gtUltimoResultadoMsg = msg;
+      const executar = ()=>{
+        const res = gerarTabelaConfrontos(sobre);
+        if(res.erro){
+          gtUltimoResultadoMsg = '⚠️ '+res.erro;
+        }else{
+          markDirty();
+          let msg = `✅ ${res.agendados} confronto(s) programado(s).`;
+          if(res.conflitosEvitados>0) msg += ` 🛡️ ${res.conflitosEvitados} tentativa(s) de horário evitada(s) por colidir com outra Equipe já escalada naquele dia/hora (mesmo local ou deslocamento insuficiente entre locais).`;
+          if(res.semEspaco>0) msg += ` ⚠️ ${res.semEspaco} confronto(s) não couberam em nenhum local compatível — aumente o horário de término, adicione mais locais/dias ou marque mais modalidades para esses locais.`;
+          if(res.protegidos>0) msg += ` 🛡️ ${res.protegidos} confronto(s) já concluído(s) foram preservados sem alteração (resultado real não é reagendado).`;
+          gtUltimoResultadoMsg = msg;
+        }
+        renderGeradorTabela();
+      };
+      // "Sobrescrever" pode reprocessar muitos jogos pendentes de uma vez -- pede
+      // confirmação só nesse caso (gerar pela primeira vez, sem sobrescrever, continua
+      // direto como sempre foi, já que só preenche o que ainda está vazio).
+      if(sobre){
+        const previa = gtPreviaGeracao(true);
+        let msgConfirm = `Isso vai reprogramar até ${previa.candidatos} confronto${previa.candidatos===1?'':'s'} pendente${previa.candidatos===1?'':'s'} (Data/Hora/Local podem mudar).`;
+        if(previa.protegidos>0) msgConfirm += ` ${previa.protegidos} confronto${previa.protegidos===1?'':'s'} já concluído${previa.protegidos===1?'':'s'} não será${previa.protegidos===1?'':'ão'} tocado${previa.protegidos===1?'':'s'} — resultado já registrado é sempre preservado.`;
+        msgConfirm += ' Continuar?';
+        showConfirm(msgConfirm, executar);
+      } else {
+        executar();
       }
-      renderGeradorTabela();
     });
   }
 }
