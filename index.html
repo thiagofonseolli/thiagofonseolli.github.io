@@ -3832,6 +3832,7 @@ function renderGtLocalCard(local){
   return `<div class="card gt-local-card" data-local="${local.id}">
     <div class="row" style="justify-content:space-between; align-items:flex-start;">
       <div class="field" style="flex:1; min-width:160px;"><label class="f-label">Nome</label><input type="text" class="gtNome" value="${escPdf(local.nome)}"></div>
+      <button class="btn secondary small gtDuplicarLocal" title="Cria um novo local com a mesma configuração">📋 Duplicar</button>
       <button class="btn danger small gtRemoveLocal">✕ Remover</button>
     </div>
     <div class="row" style="margin-top:8px;">
@@ -3936,6 +3937,7 @@ function gtRenderMatchCard(g, temConflito){
     <div style="font-size:12.5px; line-height:1.6;">${teamChip(g.teamA,g.genero)} <span class="hint" style="margin:0;">×</span> ${teamChip(g.teamB,g.genero)}</div>
     <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${escPdf(g.modalidade)} · ${g.genero==='F'?'Fem.':'Masc.'}</div>
     ${isAdmin ? `<button class="btn secondary small gtEditarSlot" data-gtgame="${g.id}" style="margin-top:7px; width:100%; font-size:11px; padding:4px 8px;">✏️ Reagendar</button>` : ''}
+    ${isAdmin && g.hora && statusInfo.status!=='concluido' ? `<button class="btn secondary small gtLimparHorario" data-gtgame="${g.id}" title="Desmarca Data/Hora/Local deste confronto, sem apagar o jogo" style="margin-top:5px; width:100%; font-size:11px; padding:4px 8px;">🗑️ Limpar horário</button>` : ''}
   </div>`;
 }
 function renderGtPreviewHtml(){
@@ -4253,6 +4255,19 @@ function bindGeradorTabelaEvents(){
     wrap.querySelectorAll('.gtEditarSlot').forEach(btn=>{
       btn.addEventListener('click', ()=> openGtReagendarModal(Number(btn.dataset.gtgame)));
     });
+    wrap.querySelectorAll('.gtLimparHorario').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const gameId = Number(btn.dataset.gtgame);
+        const g = STATE.games.find(x=>x.id===gameId);
+        if(!g) return;
+        showConfirm(`Desmarcar Data/Hora/Local de ${teamLabel(g.teamA)} × ${teamLabel(g.teamB)}? O jogo continua existindo, só fica sem horário definido (como se ainda não tivesse sido programado).`, ()=>{
+          g.data=''; g.hora=''; g.local='';
+          markDirty();
+          syncMarcarSujoGame(gameId);
+          renderGeradorTabela();
+        });
+      });
+    });
   }
 
   if(!isAdmin) return;
@@ -4317,6 +4332,17 @@ function bindGeradorTabelaEvents(){
       card.querySelector('.gtHoraFim').addEventListener('change', e=>{ local.horaFim=e.target.value; markDirty(); renderGeradorTabela(); });
       card.querySelector('.gtDuracao').addEventListener('change', e=>{ local.duracaoJogo=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
       card.querySelector('.gtTecnico').addEventListener('change', e=>{ local.tempoTecnico=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtDuplicarLocal').addEventListener('click', ()=>{
+        const copia = {
+          ...local,
+          id: nextGtLocalId(),
+          nome: `${local.nome} (cópia)`,
+          modalidades: (local.modalidades||[]).slice(),
+          bloqueios: (local.bloqueios||[]).map(b=>({...b})), // ids dos bloqueios continuam únicos dentro do próprio local (novo objeto, mesmo array de ids reaproveitado sem conflito entre locais diferentes)
+        };
+        STATE.geradorTabela.locais.push(copia);
+        markDirty(); renderGeradorTabela();
+      });
       card.querySelector('.gtRemoveLocal').addEventListener('click', ()=>{
         showConfirm(`Remover o local "${local.nome}"?`, ()=>{
           STATE.geradorTabela.locais = STATE.geradorTabela.locais.filter(l=>l.id!==localId);
