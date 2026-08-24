@@ -4581,12 +4581,24 @@ function bindEquipesEvents(){
       const genero = document.getElementById('ntGenero').value;
       const aglSel = document.getElementById('ntAglutinador').value;
       const aglutinadorId = aglSel ? Number(aglSel) : null;
-      let id = label.replace(/\s+/g,'');
-      let suffix=1; const baseId=id;
-      while(STATE.teams.some(t=>t.id===id)){ id = baseId+'_'+(++suffix); }
-      STATE.teams.push({id, label, genero, aglutinadorId});
-      document.getElementById('ntLabel').value='';
-      markDirty(); renderInscricoes(); renderScoreboard();
+
+      const criarEquipe = ()=>{
+        let id = label.replace(/\s+/g,'');
+        let suffix=1; const baseId=id;
+        while(STATE.teams.some(t=>t.id===id)){ id = baseId+'_'+(++suffix); }
+        STATE.teams.push({id, label, genero, aglutinadorId});
+        document.getElementById('ntLabel').value='';
+        markDirty(); renderInscricoes(); renderScoreboard();
+      };
+
+      // Antes só evitava colisão de ID interno (sufixo escondido) -- duas equipes com o
+      // mesmo nome digitado passavam batido, visualmente idênticas na tela.
+      const jaExiste = STATE.teams.some(t=> normalizeSearchText(t.label)===normalizeSearchText(label));
+      if(jaExiste){
+        showConfirm(`Já existe uma equipe chamada "${label}". Cadastrar mesmo assim?`, criarEquipe);
+      } else {
+        criarEquipe();
+      }
     });
 
     document.getElementById('aglAdd').addEventListener('click', ()=>{
@@ -5480,22 +5492,37 @@ function bindInscritosEvents(){
       const temAlergia = document.getElementById('alTemAlergia').value === 'sim';
       const alergiasMedicamento = temAlergia ? document.getElementById('alAlergiasTexto').value.trim() : '';
       if(!nome){ showAlert('Informe o nome do inscrito.'); return; }
+      if(!teamId){ showAlert('Cadastre e escolha uma Equipe antes de adicionar um inscrito (na sub-aba "Equipes").'); return; }
       if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
       if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
-      const novoInscritoId = nextInscritoId();
-      STATE.inscritos.push({
-        id:novoInscritoId, nome, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
-        restricaoAlimentar: temRestricao, restricoesAlimentares,
-        alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
-        foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl)
-      });
-      alNovoFotoDataUrl = null;
-      updateAlNovaFotoPreview();
-      document.getElementById('alNome').value='';
-      document.querySelectorAll('.alModCheck').forEach(c=>c.checked=false);
-      document.getElementById('alTemRestricao').value='nao'; document.getElementById('alRestricaoWrap').style.display='none'; document.getElementById('alRestricoesTexto').value='';
-      document.getElementById('alTemAlergia').value='nao'; document.getElementById('alAlergiaWrap').style.display='none'; document.getElementById('alAlergiasTexto').value='';
-      markDirty(); renderInscritosBody();
+
+      const criarInscrito = ()=>{
+        const novoInscritoId = nextInscritoId();
+        STATE.inscritos.push({
+          id:novoInscritoId, nome, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
+          restricaoAlimentar: temRestricao, restricoesAlimentares,
+          alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
+          foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl)
+        });
+        alNovoFotoDataUrl = null;
+        updateAlNovaFotoPreview();
+        document.getElementById('alNome').value='';
+        document.querySelectorAll('.alModCheck').forEach(c=>c.checked=false);
+        document.getElementById('alTemRestricao').value='nao'; document.getElementById('alRestricaoWrap').style.display='none'; document.getElementById('alRestricoesTexto').value='';
+        document.getElementById('alTemAlergia').value='nao'; document.getElementById('alAlergiaWrap').style.display='none'; document.getElementById('alAlergiasTexto').value='';
+        markDirty(); renderInscritosBody();
+      };
+
+      // Diferente da importação por planilha (que já não duplica quem tem mesmo
+      // nome+equipe) e de "Adicionar aglutinador" (que já recusa nome repetido), o
+      // cadastro manual não tinha nenhuma checagem — um duplo-clique ou reenvio por
+      // engano criava um segundo inscrito idêntico em silêncio.
+      const jaExiste = STATE.inscritos.some(a=> a.teamId===teamId && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+      if(jaExiste){
+        showConfirm(`Já existe um inscrito chamado "${nome}" em ${teamLabel(teamId)}. Cadastrar mesmo assim? (pode ser realmente um segundo aluno com o mesmo nome, ou uma duplicidade por engano)`, criarInscrito);
+      } else {
+        criarInscrito();
+      }
     });
   }
 
