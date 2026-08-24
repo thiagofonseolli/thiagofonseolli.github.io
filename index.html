@@ -3227,13 +3227,34 @@ function renderPainel(){
   const totalGames = STATE.games.length;
   const played = STATE.games.filter(g=> g.wo || (g.scoreA!=null && g.scoreB!=null)).length;
   const pct = totalGames ? Math.round(played/totalGames*100) : 0;
+  // Uma barra agregada não conta a história toda quando várias modalidades rodam ao
+  // mesmo tempo -- "65%" não diz se é o Futsal que está atrasado ou o Vôlei. Com mais de
+  // uma modalidade cadastrada, mostra também uma barra por modalidade.
+  const porModalidade = STATE.modalidades.map(mod=>{
+    const jogosMod = STATE.games.filter(g=>g.modalidade===mod);
+    const jogadosMod = jogosMod.filter(g=> g.wo || (g.scoreA!=null && g.scoreB!=null)).length;
+    return {mod, jogadosMod, totalMod: jogosMod.length, pctMod: jogosMod.length ? Math.round(jogadosMod/jogosMod.length*100) : 0};
+  }).filter(m=>m.totalMod>0);
   html += `<div class="card"><h2>Progresso dos Jogos</h2>
     <p class="hint">${played} de ${totalGames} partidas de esportes coletivos registradas (${pct}%).</p>
     <div style="height:10px; background:var(--border); border-radius:5px; overflow:hidden;"><div style="height:100%; width:${pct}%; background:var(--green);"></div></div>
+    ${porModalidade.length>1 ? `<div style="margin-top:14px; display:flex; flex-direction:column; gap:9px;">
+      ${porModalidade.map(m=>`<div>
+        <p class="hint" style="margin:0 0 3px; display:flex; justify-content:space-between;"><span>${escPdf(m.mod)}</span><span>${m.jogadosMod}/${m.totalMod} (${m.pctMod}%)</span></p>
+        <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden;"><div style="height:100%; width:${m.pctMod}%; background:var(--gold);"></div></div>
+      </div>`).join('')}
+    </div>` : ''}
   </div>`;
   document.getElementById('main').innerHTML = html;
   const btnPub = document.getElementById('btnPublicarResultados');
   if(btnPub) btnPub.addEventListener('click', gerarPaginaPublicaResultados);
+  document.querySelectorAll('.classificacaoRow').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const teamId = row.dataset.teamid;
+      expandedTeamId = expandedTeamId===teamId ? null : teamId;
+      renderPainel();
+    });
+  });
 }
 
 /* ===================== JOGOS ===================== */
@@ -7384,16 +7405,68 @@ function wireGameDetailPanelEvents(gameId, panelEl){
 }
 
 /* ===================== CLASSIFICAÇÃO ===================== */
+let expandedTeamId = null; // linha de "extrato" (de onde vieram os pontos) expandida na Classificação Geral — só uma por vez
+
+/* Recalcula, na hora (não guardado em STATE), de onde vieram os pontos de uma Equipe —
+   jogo por jogo, colocação individual, item do desfile, ajuste e critério personalizado.
+   Antes só dava pra ver o número final de cada coluna; pra entender "por que essa Equipe
+   tem 45 pontos" era preciso abrir Jogos/Individual/Desfile/Ajustes/Critérios um por um
+   e somar na mão. */
+function buildExtratoEquipeHtml(teamId){
+  const linhasJogos = STATE.games.filter(g=> g.teamA===teamId || g.teamB===teamId).map(g=>{
+    const side = g.teamA===teamId ? 'A' : 'B';
+    const pts = gamePoints(g, side);
+    if(pts===null && g.wo==null) return null; // ainda sem resultado -- não entra no extrato
+    const adversario = teamLabel(side==='A'?g.teamB:g.teamA);
+    const fp = side==='A'?g.fpA:g.fpB;
+    const fpPts = fp ? (STATE.regras.fairPlay[fp]||0) : 0;
+    return `<tr><td>${escPdf(g.modalidade)} × ${escPdf(adversario)}</td><td class="mono">${pts??0} pts</td><td class="mono">${fpPts>0?`+${fpPts} (Jogo Limpo ${escPdf(fp)})`:'—'}</td></tr>`;
+  }).filter(Boolean);
+
+  const individuaisDaEquipe = [];
+  const modOptions = inscritoModalidadeOptions();
+  Object.keys(STATE.individual).forEach(key=>{
+    const map = STATE.individual[key];
+    if(map && map[teamId]!=null){
+      const placement = map[teamId];
+      const pts = STATE.regras.individual[placement-1] || 0;
+      const modOpt = modOptions.find(o=>o.key===key);
+      individuaisDaEquipe.push(`<tr><td>${escPdf(modOpt?modOpt.label:key)} — ${placement}º lugar</td><td class="mono">${pts} pts</td></tr>`);
+    }
+  });
+
+  const df = STATE.desfile[teamId] || {};
+  const desfileLinhas = [['Participação', df.participacao], ['Organização', df.organizacao], ['Performance', df.performance], ['Postura na arquibancada', df.postura]]
+    .filter(([,v])=>v).map(([label,v])=>`<tr><td>${label}</td><td class="mono">${v} pts</td></tr>`);
+
+  const ajustesDaEquipe = (STATE.ajustes[teamId]||[]).map(a=>`<tr><td>${escPdf(a.motivo||'Ajuste')}</td><td class="mono">${a.pontos>0?'+':''}${a.pontos} pts</td></tr>`);
+
+  const criteriosDaEquipe = (STATE.criteriosPersonalizados||[])
+    .map(c=> ({nome:c.nome, pts: Number(c.pontos[teamId])||0}))
+    .filter(c=>c.pts!==0)
+    .map(c=>`<tr><td>${escPdf(c.nome)}</td><td class="mono">${c.pts>0?'+':''}${c.pts} pts</td></tr>`);
+
+  const secao = (titulo, linhas) => linhas.length ? `<p style="font-weight:600; font-size:12.5px; margin:10px 0 4px; color:var(--navy);">${titulo}</p><table><tbody>${linhas.join('')}</tbody></table>` : '';
+
+  const corpo = secao('Jogos', linhasJogos) + secao('Modalidades Individuais', individuaisDaEquipe) + secao('Desfile de Abertura', desfileLinhas) + secao('Ajustes e Penalidades', ajustesDaEquipe) + secao('Critérios Personalizados', criteriosDaEquipe);
+  return corpo || '<p class="hint" style="margin:0;">Nenhuma pontuação lançada ainda para esta Equipe.</p>';
+}
+
 function classificacaoHtml(){
   const rows = computeStandings();
   let html = `<div class="card"><h2>Classificação Geral</h2>
+    <p class="hint">Clique numa Equipe para ver de onde vieram os pontos dela.</p>
     <table><thead><tr><th>#</th><th>equipe</th><th>Jogos</th><th>Saldo</th><th>Jogo Limpo</th><th>Individuais</th><th>Desfile</th><th>Ajustes</th><th>Critérios</th><th>Total</th></tr></thead><tbody>`;
   rows.forEach((r,i)=>{
     const cls = i===0?'gold':i===1?'silver':i===2?'bronze':'';
     const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
-    html += `<tr class="${cls}"><td>${medal}</td><td>${teamChip(r.team.id, null)}</td><td class="mono">${r.pontosJogos}</td>
+    const expanded = expandedTeamId===r.team.id;
+    html += `<tr class="${cls} classificacaoRow" data-teamid="${r.team.id}" style="cursor:pointer;"><td>${medal}</td><td>${teamChip(r.team.id, null)}</td><td class="mono">${r.pontosJogos}</td>
       <td class="mono">${r.saldo>0?'+':''}${r.saldo}</td><td class="mono">${r.fair}</td><td class="mono">${r.pontosIndividual}</td>
-      <td class="mono">${r.pontosDesfile}</td><td class="mono">${r.pontosAjustes}</td><td class="mono">${r.pontosCriterios}</td><td class="mono" style="font-weight:700;">${r.total}</td></tr>`;
+      <td class="mono">${r.pontosDesfile}</td><td class="mono">${r.pontosAjustes}</td><td class="mono">${r.pontosCriterios}</td><td class="mono" style="font-weight:700;">${r.total} <span style="font-weight:400; color:var(--muted);">${expanded?'▾':'▸'}</span></td></tr>`;
+    if(expanded){
+      html += `<tr class="classificacaoExtrato"><td colspan="10" style="background:var(--bg); padding:14px 16px;">${buildExtratoEquipeHtml(r.team.id)}</td></tr>`;
+    }
   });
   if(rows.length===0) html += `<tr><td colspan="10" class="hint">Nenhuma equipe cadastrada.</td></tr>`;
   html += `</tbody></table></div>`;
