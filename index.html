@@ -5888,15 +5888,24 @@ function saveEditArtisticaModal(){
   renderArtisticasBody();
 }
 
+/* Coloca um campo entre aspas no padrão CSV (RFC 4180) — protege qualquer conteúdo que
+   tenha ";", quebra de linha ou aspas dentro dele, sem isso o campo "vaza" pra coluna
+   seguinte quando o arquivo é aberto no Excel/Sheets. Confirmado com teste: uma
+   restrição alimentar digitada como "Leite; Ovo; Amendoim" (";" dentro do próprio
+   texto) deslocava as colunas seguintes (Alergia, Modalidades) antes desta correção. */
+function csvField(value){
+  return `"${String(value==null?'':value).replace(/"/g,'""')}"`;
+}
 function exportInscritosCSV(){
   const list = filteredInscritos();
-  const lines = ['Nome;equipe;Gênero;Código;Restrição alimentar;Alergia a medicamento;Modalidades'];
+  const cabecalho = ['Nome','equipe','Gênero','Código','Restrição alimentar','Alergia a medicamento','Modalidades'];
+  const lines = [cabecalho.map(csvField).join(';')];
   list.forEach(a=>{
     const generoTxt = a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'';
     const mods = (a.modalidades||[]).map(m=>modLabel(m)).join(' | ');
     const restr = a.restricaoAlimentar ? a.restricoesAlimentares : 'Não';
     const alerg = a.alergiaMedicamento ? a.alergias : 'Não';
-    lines.push(`${a.nome};${teamLabel(a.teamId)};${generoTxt};${a.codigo||''};${restr};${alerg};${mods}`);
+    lines.push([a.nome, teamLabel(a.teamId), generoTxt, a.codigo||'', restr, alerg, mods].map(csvField).join(';'));
   });
   const csv = '\uFEFF' + lines.join('\r\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
@@ -5908,9 +5917,6 @@ function exportInscritosCSV(){
   URL.revokeObjectURL(url);
 }
 
-/* Decodifica o modelo oficial (embutido em base64) e dispara o download — é o mesmo arquivo
-   que a escola já usa, sem geração dinâmica: nomes de equipe são preenchidos à mão por quem
-   recebe a planilha, então não há necessidade de menus suspensos aqui. */
 /* ===================== GERADOR DE .xlsx (ZIP + XML, sem biblioteca externa) =====================
    Constrói um .xlsx mínimo (uma aba, texto simples, sem estilos) na hora, com as
    Equipes/modalidades REAIS do torneio — em vez de um modelo fixo desatualizado. Testado
