@@ -2117,21 +2117,48 @@ function teamShade(genero){
   if(genero==='F') return {light:84, sat:62};
   return {light:60, sat:50};
 }
+/* Converte HSL pra hex (#RRGGBB) -- só precisa disso pra dar um valor inicial válido ao
+   <input type="color"> (que exige hex) quando a equipe ainda não tem cor manual: começa
+   já mostrando a cor automática atual, em vez de um valor arbitrário. */
+function hslParaHex(h, s, l){
+  s/=100; l/=100;
+  const k = n => (n + h/30) % 12;
+  const a = s * Math.min(l, 1-l);
+  const f = n => l - a*Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n), 1)));
+  const toHex = x => Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
 function teamColor(teamId, genero){
+  const team = STATE.teams.find(t=>t.id===teamId);
+  if(team && team.corManual) return team.corManual; // cor escolhida manualmente tem prioridade sobre a automática
   const hue = teamHue(teamId);
   const {light, sat} = teamShade(genero);
   return `hsl(${hue.toFixed(1)} ${sat}% ${light}%)`;
 }
-function teamTextColorFor(genero){
+/* Luminosidade percebida de uma cor hex (#RRGGBB), pra decidir se o texto por cima
+   deve ser claro ou escuro — usada só quando a equipe tem cor manual, já que nesse
+   caso não dá pra assumir a luminosidade a partir do gênero como no cálculo automático. */
+function corHexEhClara(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex||'');
+  if(!m) return true;
+  const n = parseInt(m[1],16);
+  const r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  return (0.299*r + 0.587*g + 0.114*b)/255 > 0.6;
+}
+function teamTextColorFor(genero, teamId){
+  if(teamId!=null){
+    const team = STATE.teams.find(t=>t.id===teamId);
+    if(team && team.corManual) return corHexEhClara(team.corManual) ? '#152033' : '#FFFFFF';
+  }
   return teamShade(genero).light < 55 ? '#FFFFFF' : '#152033';
 }
 function teamChip(teamId, genero, extraClass){
   const bg = teamColor(teamId, genero);
-  const txt = teamTextColorFor(genero);
+  const txt = teamTextColorFor(genero, teamId);
   return `<span class="team-chip${extraClass?' '+extraClass:''}" style="background:${bg};color:${txt};">${escPdf(teamLabel(teamId))}</span>`;
 }
 function teamOptionStyle(teamId, genero){
-  return `background:${teamColor(teamId, genero)};color:${teamTextColorFor(genero)};`;
+  return `background:${teamColor(teamId, genero)};color:${teamTextColorFor(genero, teamId)};`;
 }
 
 let STATE = null;
@@ -4501,7 +4528,7 @@ function renderEquipesContentHtml(){
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ntAdd">+ Adicionar equipe</button></div>
     </div>` : ''}
   </div>
-  <div class="card"><table><thead><tr><th>equipe</th><th>Gênero</th><th>Aglutinador</th><th></th></tr></thead><tbody id="teamsBody"></tbody></table></div>
+  <div class="card"><table><thead><tr><th>equipe</th><th>Gênero</th><th>Aglutinador</th><th>Cor</th><th></th></tr></thead><tbody id="teamsBody"></tbody></table></div>
 
   <div class="card">
     <h2>Aglutinadores</h2>
@@ -4647,6 +4674,10 @@ function renderTeamsBody(){
         <option value="">— Nenhum —</option>
         ${STATE.aglutinadores.map(g=>`<option value="${g.id}" ${t.aglutinadorId===g.id?'selected':''}>${escPdf(g.nome)}</option>`).join('')}
       </select>` : (STATE.aglutinadores.find(g=>g.id===t.aglutinadorId)?.nome || '<span class="hint">—</span>')}</td>
+    <td>${isAdmin ? `<div style="display:flex; align-items:center; gap:5px;">
+        <input type="color" class="teamCor" value="${t.corManual || hslParaHex(teamHue(t.id), teamShade(t.genero).sat, teamShade(t.genero).light)}" title="Escolher cor da equipe" style="width:34px; height:28px; padding:1px; border:1px solid var(--border); border-radius:5px; cursor:pointer; ${t.corManual?'':'opacity:0.4;'}">
+        ${t.corManual ? '<button class="btn secondary small teamCorReset" title="Voltar para a cor automática">↺</button>' : '<span class="hint" style="margin:0;">automática</span>'}
+      </div>` : ''}</td>
     <td>${isAdmin?'<button class="btn danger small removeTeam">✕ Remover</button>':''}</td></tr>`).join('');
   body.querySelectorAll('.teamGenero').forEach(sel=>{
     sel.addEventListener('change', ()=>{
@@ -4662,6 +4693,24 @@ function renderTeamsBody(){
       const team = STATE.teams.find(t=>t.id===id);
       team.aglutinadorId = sel.value ? Number(sel.value) : null;
       markDirty();
+    });
+  });
+  body.querySelectorAll('.teamCor').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const id = inp.closest('tr').dataset.id;
+      const team = STATE.teams.find(t=>t.id===id);
+      team.corManual = inp.value;
+      markDirty();
+      renderTeamsBody(); // atualiza o "automática"/botão ↺ e o chip de exemplo na 1ª coluna
+    });
+  });
+  body.querySelectorAll('.teamCorReset').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.closest('tr').dataset.id;
+      const team = STATE.teams.find(t=>t.id===id);
+      team.corManual = null;
+      markDirty();
+      renderTeamsBody();
     });
   });
   body.querySelectorAll('.removeTeam').forEach(btn=>{
@@ -6979,7 +7028,7 @@ function escPdf(str){
 }
 function pdfTeamChip(teamId, genero){
   const bg = teamColor(teamId, genero);
-  const txt = teamTextColorFor(genero);
+  const txt = teamTextColorFor(genero, teamId);
   return `<span style="display:inline-block; padding:2px 8px; border-radius:5px; font-weight:700; background:${bg}; color:${txt};">${escPdf(teamLabel(teamId))}</span>`;
 }
 
