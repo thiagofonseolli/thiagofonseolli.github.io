@@ -4730,6 +4730,7 @@ function renderTeamsBody(){
     sel.addEventListener('change', ()=>{
       const id = sel.closest('tr').dataset.id;
       const team = STATE.teams.find(t=>t.id===id);
+      if(!team) return; // a equipe pode ter sido removida por outro dispositivo (sincronização) entre a renderização e o clique
       team.genero = sel.value;
       markDirty();
     });
@@ -4738,6 +4739,7 @@ function renderTeamsBody(){
     sel.addEventListener('change', ()=>{
       const id = sel.closest('tr').dataset.id;
       const team = STATE.teams.find(t=>t.id===id);
+      if(!team) return;
       team.aglutinadorId = sel.value ? Number(sel.value) : null;
       markDirty();
     });
@@ -4746,6 +4748,7 @@ function renderTeamsBody(){
     inp.addEventListener('input', ()=>{
       const id = inp.closest('tr').dataset.id;
       const team = STATE.teams.find(t=>t.id===id);
+      if(!team) return;
       team.corManual = inp.value;
       markDirty();
       renderTeamsBody(); // atualiza o "automática"/botão ↺ e o chip de exemplo na 1ª coluna
@@ -4755,6 +4758,7 @@ function renderTeamsBody(){
     btn.addEventListener('click', ()=>{
       const id = btn.closest('tr').dataset.id;
       const team = STATE.teams.find(t=>t.id===id);
+      if(!team) return;
       team.corManual = null;
       markDirty();
       renderTeamsBody();
