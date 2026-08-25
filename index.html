@@ -1754,9 +1754,17 @@ function parseEditalTopics(html){
 
 /* Reconstrói o HTML completo do edital a partir do preâmbulo + lista de tópicos — usada ao
    salvar a edição de um tópico individual, preservando todos os demais intactos. */
+/* Reconstrói o HTML completo do edital a partir do preâmbulo + lista de tópicos — usada ao
+   salvar a edição de um tópico individual, preservando todos os demais intactos. O título
+   PRECISA passar por escPdf() aqui — esse HTML é persistido e depois RE-INTERPRETADO como
+   DOM de verdade em parseEditalTopics() (via `elemento.innerHTML = html`) toda vez que a
+   aba é aberta; um título com HTML bruto (ex.: uma tag <img onerror=...>) viraria um
+   elemento de verdade nesse momento, podendo disparar antes de qualquer escape na hora de
+   exibir. Sem essa correção, era um XSS persistente que rodava pra qualquer visitante da
+   aba Edital (pública, não só para admin) — não só um problema de exibição pontual. */
 function rebuildEditalHtml(preambuloHtml, topics){
   let out = preambuloHtml || '';
-  topics.forEach(t=>{ out += `<p><strong>${t.title}</strong></p>` + (t.bodyHtml||''); });
+  topics.forEach(t=>{ out += `<p><strong>${escPdf(t.title)}</strong></p>` + (t.bodyHtml||''); });
   return out;
 }
 
