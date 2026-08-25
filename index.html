@@ -4356,7 +4356,13 @@ function bindGeradorTabelaEvents(){
         const g = STATE.games.find(x=>x.id===gameId);
         if(!g) return;
         showConfirm(`Desmarcar Data/Hora/Local de ${teamLabel(g.teamA)} × ${teamLabel(g.teamB)}? O jogo continua existindo, só fica sem horário definido (como se ainda não tivesse sido programado).`, ()=>{
-          g.data=''; g.hora=''; g.local='';
+          // Busca de novo, não usa `g` capturado antes do showConfirm() -- enquanto o
+          // diálogo esperava o clique de confirmar, uma sincronização concorrente podia
+          // ter substituído o objeto no array (mesmo problema já corrigido no painel de
+          // detalhes do jogo e nos locais do Gerador de Tabela).
+          const jogoAtual = STATE.games.find(x=>x.id===gameId);
+          if(!jogoAtual) return;
+          jogoAtual.data=''; jogoAtual.hora=''; jogoAtual.local='';
           markDirty();
           syncMarcarSujoGame(gameId);
           renderGeradorTabela();
@@ -4472,7 +4478,12 @@ function bindGeradorTabelaEvents(){
           const bloqueioId = Number(btn.dataset.bloqueio);
           const bloqueio = (local.bloqueios||[]).find(b=>b.id===bloqueioId);
           showConfirm(`Remover o bloqueio "${bloqueio?bloqueio.inicio+'–'+bloqueio.fim:''}"${bloqueio&&bloqueio.motivo?` (${bloqueio.motivo})`:''}?`, ()=>{
-            local.bloqueios = (local.bloqueios||[]).filter(b=>b.id!==bloqueioId);
+            // Busca de novo (não usa `local` capturado antes do showConfirm) -- mesmo
+            // motivo da correção acima: enquanto o diálogo esperava confirmação, uma
+            // sincronização concorrente podia ter substituído o objeto no array.
+            const localAtual = STATE.geradorTabela.locais.find(l=>l.id===localId);
+            if(!localAtual) return;
+            localAtual.bloqueios = (localAtual.bloqueios||[]).filter(b=>b.id!==bloqueioId);
             markDirty(); renderGeradorTabela();
           });
         });
