@@ -2582,15 +2582,20 @@ function syncDetectarMudancasEAgendar(){
   SYNC_TABELAS_DIFF.forEach(tabela=>{
     const idsAtuais = syncListarIdsAtuais(tabela);
     const anterior = syncUltimoRetrato[tabela] || {};
-    const atual = {};
     idsAtuais.forEach(id=>{
       const linha = syncConstruirLinha(tabela, id);
       const json = JSON.stringify(linha.dados);
-      atual[id] = json;
       if(anterior[id] !== json) syncMarcarPendente(tabela, id);
     });
-    Object.keys(anterior).forEach(id=>{ if(!(id in atual)) syncMarcarPendente(tabela, id); });
-    syncUltimoRetrato[tabela] = atual;
+    Object.keys(anterior).forEach(id=>{ if(!idsAtuais.map(String).includes(String(id))) syncMarcarPendente(tabela, id); });
+    // NÃO atualiza syncUltimoRetrato aqui — só marca o que precisa ser enviado. O
+    // retrato só é atualizado depois que o ENVIO for de fato confirmado com sucesso
+    // (ver syncEnviarPendentes) ou depois de um PULL (syncAtualizarRetratoPosPull).
+    // Antes, atualizava aqui de forma otimista — se a requisição de rede seguinte
+    // falhasse (offline, timeout, Supabase fora do ar), o retrato já tinha sido
+    // atualizado como se o envio tivesse dado certo, e a fila de pendentes já tinha
+    // sido esvaziada: a mudança local ficava "esquecida", nunca mais reenviada, mesmo
+    // continuando visível e correta só na tela de quem editou.
   });
 }
 /* Depois de aplicar dados recebidos de outro dispositivo (PULL), o retrato precisa
@@ -2625,9 +2630,20 @@ function syncMarcarSujoCheckin(checkinId){ syncMarcarPendente('checkins', checki
 
 async function syncEnviarPendentes(){
   if(syncPendentes.size===0) return 0;
-  const linhas = Array.from(syncPendentes.values()).map(({tabela, registro_id})=> syncConstruirLinha(tabela, registro_id));
-  syncPendentes.clear();
-  await syncEnviarLote(linhas);
+  const itens = Array.from(syncPendentes.entries()); // [ [chave, {tabela, registro_id}], ... ]
+  const linhas = itens.map(([,{tabela, registro_id}])=> syncConstruirLinha(tabela, registro_id));
+  await syncEnviarLote(linhas); // se isso lançar (erro de rede), nada abaixo roda — os itens continuam pendentes pro próximo ciclo tentar de novo
+  // Só remove da fila de pendentes E atualiza o retrato DEPOIS de confirmar sucesso —
+  // usando exatamente os dados que foram enviados agora (não uma releitura do STATE),
+  // pra não "confirmar" por engano uma edição mais nova que tenha acontecido durante a
+  // própria requisição.
+  itens.forEach(([chave, {tabela, registro_id}], idx)=>{
+    syncPendentes.delete(chave);
+    if(!syncUltimoRetrato[tabela]) syncUltimoRetrato[tabela] = {};
+    const linha = linhas[idx];
+    if(linha.deletado) delete syncUltimoRetrato[tabela][registro_id];
+    else syncUltimoRetrato[tabela][String(registro_id)] = JSON.stringify(linha.dados);
+  });
   return linhas.length;
 }
 async function syncPuxarNovidades(){
@@ -2707,8 +2723,7 @@ async function syncCiclo(){
       // syncPrimeiroCicloFeito só vira true quando a puxada realmente teve sucesso.
       const aplicadas = await syncPuxarNovidades();
       syncUltimaPrimeiraPuxadaQtd = aplicadas;
-      syncDetectarMudancasEAgendar(); // cria o retrato em cima dos dados já sincronizados
-      syncPendentes.clear(); // descarta qualquer coisa que o retrato inicial tenha marcado
+      syncAtualizarRetratoPosPull(); // monta o retrato em cima dos dados já sincronizados, sem marcar nada como pendente
       syncPrimeiroCicloFeito = true;
       syncStatus = 'ok';
       syncLastSuccessAt = new Date();
