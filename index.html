@@ -8095,8 +8095,13 @@ function renderAjustesBody(){
     <td>${isAdmin?`<button class="btn danger small removeAj" data-team="${r.teamId}" data-idx="${r.idx}">Remover</button>`:''}</td></tr>`).join('');
   body.querySelectorAll('.removeAj').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      STATE.ajustes[btn.dataset.team].splice(Number(btn.dataset.idx),1);
-      markDirty(); renderAjustesBody(); renderScoreboard();
+      const teamId = btn.dataset.team, idx = Number(btn.dataset.idx);
+      const ajuste = (STATE.ajustes[teamId]||[])[idx];
+      if(!ajuste) return;
+      showConfirm(`Remover o ajuste "${ajuste.motivo}" (${ajuste.pontos>0?'+':''}${ajuste.pontos} pts) de ${teamLabel(teamId)}?`, ()=>{
+        STATE.ajustes[teamId].splice(idx,1);
+        markDirty(); renderAjustesBody(); renderScoreboard();
+      });
     });
   });
 }
