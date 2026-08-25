@@ -2427,7 +2427,7 @@ function syncConstruirLinha(tabela, registroId){
   if(tabela==='config'){
     const valores = {
       eventName: STATE.eventName,
-      headerTexto: {subtitle: STATE.header.subtitle},
+      headerTexto: {subtitle: STATE.header.subtitle, eyebrow: STATE.header.eyebrow},
       headerLogoRef: STATE.header.logoDataUrl || null,
       headerBgRef: STATE.header.bgDataUrl || null,
       crachaLogo1Ref: STATE.crachaLogos.logo1 || null,
@@ -2532,7 +2532,7 @@ function syncAplicarLinha(linha){
     // e nos outros blocos especiais acima.
     if(syncTemEdicaoLocalPendente('config', registro_id)) return;
     if(registro_id==='eventName') STATE.eventName = dados;
-    else if(registro_id==='headerTexto') STATE.header.subtitle = dados.subtitle||'';
+    else if(registro_id==='headerTexto'){ STATE.header.subtitle = dados.subtitle||''; STATE.header.eyebrow = dados.eyebrow||''; }
     else if(registro_id==='headerLogoRef'){ STATE.header.logoDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
     else if(registro_id==='headerBgRef'){ STATE.header.bgDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
     else if(registro_id==='crachaLogo1Ref'){ STATE.crachaLogos.logo1 = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
