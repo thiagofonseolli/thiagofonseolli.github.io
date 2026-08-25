@@ -2492,6 +2492,23 @@ function syncAplicarLinha(linha){
   }
   if(tabela==='config'){
     if(dados==null) return;
+    // Se o valor ATUAL deste dispositivo pra essa chave já é diferente do último
+    // retrato conhecido (ou seja, existe uma edição local feita aqui que ainda não foi
+    // confirmada como enviada pro Supabase), NÃO aplica o valor vindo da nuvem por cima
+    // dela. Sem essa checagem: um ciclo de sincronização em segundo plano (a cada 20s)
+    // que "cruza" bem no meio de uma edição — ex.: trocar a senha de admin — pode
+    // reverter silenciosamente a mudança que a pessoa acabou de fazer, ANTES mesmo dela
+    // ter sido enviada (o auto-save só dispara 1.5s depois de parar de digitar). Isso
+    // reproduz exatamente o sintoma relatado: "troquei a senha e ela voltou pra
+    // original" — sem essa proteção, o próprio ciclo periódico de sincronização podia
+    // fazer isso sozinho, sem precisar de um segundo dispositivo nem de nada digitado
+    // errado. Marca explicitamente como pendente, pra garantir que vai no próximo envio.
+    const jsonAtual = JSON.stringify(syncConstruirLinha('config', registro_id).dados);
+    const jsonConhecido = (syncUltimoRetrato['config']||{})[registro_id];
+    if(jsonConhecido!==undefined && jsonAtual!==jsonConhecido){
+      syncMarcarPendente('config', registro_id);
+      return;
+    }
     if(registro_id==='eventName') STATE.eventName = dados;
     else if(registro_id==='headerTexto') STATE.header.subtitle = dados.subtitle||'';
     else if(registro_id==='headerLogoRef'){ STATE.header.logoDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
