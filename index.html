@@ -8090,7 +8090,7 @@ function renderAjustesBody(){
   let rows=[];
   Object.keys(STATE.ajustes).forEach(teamId=> (STATE.ajustes[teamId]||[]).forEach((a,idx)=> rows.push({teamId, idx, ...a})));
   if(rows.length===0){ body.innerHTML = `<tr><td class="hint" colspan="4">Nenhum ajuste lançado ainda.</td></tr>`; return; }
-  body.innerHTML = rows.map(r=>`<tr><td>${teamChip(r.teamId, null)}</td><td>${r.motivo}</td>
+  body.innerHTML = rows.map(r=>`<tr><td>${teamChip(r.teamId, null)}</td><td>${escPdf(r.motivo)}</td>
     <td class="mono" style="color:${r.pontos<0?'var(--crimson)':'var(--green)'}">${r.pontos>0?'+':''}${r.pontos}</td>
     <td>${isAdmin?`<button class="btn danger small removeAj" data-team="${r.teamId}" data-idx="${r.idx}">Remover</button>`:''}</td></tr>`).join('');
   body.querySelectorAll('.removeAj').forEach(btn=>{
