@@ -7396,9 +7396,17 @@ function buildGameDetailHtml(gameId){
    já que vários jogos da lista podem existir na página ao mesmo tempo (só um fica
    expandido por vez, mas essa é a forma correta de evitar conflito entre eles). */
 function wireGameDetailPanelEvents(gameId, panelEl){
-  const game = STATE.games.find(g=>g.id===gameId);
+  let game = STATE.games.find(g=>g.id===gameId);
   if(!game || !panelEl) return;
   const sumula = getSumula(game.id);
+  // Sincronização (ver correções anteriores) substitui o OBJETO inteiro no array quando
+  // aplica um pull (arr[idx] = item), não muda propriedades no objeto existente. Sem
+  // isso, se outro dispositivo atualizasse ESTE MESMO jogo enquanto o painel já estava
+  // aberto aqui, `game` continuaria apontando pro objeto antigo (órfão, fora do array) —
+  // e qualquer edição feita depois iria parar nesse objeto órfão, nunca chegando no
+  // STATE.games de verdade (perda silenciosa). Chamada no início de cada handler,
+  // garante que `game` sempre aponta pro objeto atualmente no array antes de ler/editar.
+  const refrescarGame = ()=>{ const atual = STATE.games.find(g=>g.id===gameId); if(atual) game = atual; return game; };
 
   const rerender = ()=>{
     const stillExpanded = expandedGameId===gameId;
@@ -7410,17 +7418,17 @@ function wireGameDetailPanelEvents(gameId, panelEl){
   const sdScoreAEl = panelEl.querySelector('.sdScoreA'), sdScoreBEl = panelEl.querySelector('.sdScoreB');
   const sdWoEl = panelEl.querySelector('.sdWoSelect'), sdFpAEl = panelEl.querySelector('.sdFpA'), sdFpBEl = panelEl.querySelector('.sdFpB');
   const sdDataEl = panelEl.querySelector('.sdDataInput'), sdHoraEl = panelEl.querySelector('.sdHoraInput'), sdLocalEl = panelEl.querySelector('.sdLocalInput');
-  if(sdScoreAEl) sdScoreAEl.addEventListener('input', ()=>{ game.scoreA = sdScoreAEl.value===''?null:Number(sdScoreAEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
-  if(sdScoreBEl) sdScoreBEl.addEventListener('input', ()=>{ game.scoreB = sdScoreBEl.value===''?null:Number(sdScoreBEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
-  if(sdWoEl) sdWoEl.addEventListener('change', ()=>{ game.wo = sdWoEl.value || null; if(game.wo){ game.scoreA=null; game.scoreB=null; } markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); rerender(); });
-  if(sdFpAEl) sdFpAEl.addEventListener('change', ()=>{ game.fpA = sdFpAEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
-  if(sdFpBEl) sdFpBEl.addEventListener('change', ()=>{ game.fpB = sdFpBEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
-  if(sdDataEl) sdDataEl.addEventListener('change', ()=>{ game.data = sdDataEl.value; markDirty(); syncMarcarSujoGame(gameId); verificarConflitoHorarioLocal(game); });
-  if(sdHoraEl) sdHoraEl.addEventListener('change', ()=>{ game.hora = sdHoraEl.value; markDirty(); syncMarcarSujoGame(gameId); verificarConflitoHorarioLocal(game); });
+  if(sdScoreAEl) sdScoreAEl.addEventListener('input', ()=>{ refrescarGame(); game.scoreA = sdScoreAEl.value===''?null:Number(sdScoreAEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
+  if(sdScoreBEl) sdScoreBEl.addEventListener('input', ()=>{ refrescarGame(); game.scoreB = sdScoreBEl.value===''?null:Number(sdScoreBEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
+  if(sdWoEl) sdWoEl.addEventListener('change', ()=>{ refrescarGame(); game.wo = sdWoEl.value || null; if(game.wo){ game.scoreA=null; game.scoreB=null; } markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); rerender(); });
+  if(sdFpAEl) sdFpAEl.addEventListener('change', ()=>{ refrescarGame(); game.fpA = sdFpAEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
+  if(sdFpBEl) sdFpBEl.addEventListener('change', ()=>{ refrescarGame(); game.fpB = sdFpBEl.value || null; markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); });
+  if(sdDataEl) sdDataEl.addEventListener('change', ()=>{ refrescarGame(); game.data = sdDataEl.value; markDirty(); syncMarcarSujoGame(gameId); verificarConflitoHorarioLocal(game); });
+  if(sdHoraEl) sdHoraEl.addEventListener('change', ()=>{ refrescarGame(); game.hora = sdHoraEl.value; markDirty(); syncMarcarSujoGame(gameId); verificarConflitoHorarioLocal(game); });
   if(sdLocalEl){
-    sdLocalEl.addEventListener('input', ()=>{ game.local = sdLocalEl.value; markDirty(); syncMarcarSujoGame(gameId); });
+    sdLocalEl.addEventListener('input', ()=>{ refrescarGame(); game.local = sdLocalEl.value; markDirty(); syncMarcarSujoGame(gameId); });
     // o aviso de conflito só dispara ao SAIR do campo (blur), não a cada letra digitada
-    sdLocalEl.addEventListener('blur', ()=> verificarConflitoHorarioLocal(game));
+    sdLocalEl.addEventListener('blur', ()=>{ refrescarGame(); verificarConflitoHorarioLocal(game); });
   }
 
   const pdfBtn = panelEl.querySelector('.btnGerarSumulaPdf');
@@ -7432,6 +7440,7 @@ function wireGameDetailPanelEvents(gameId, panelEl){
   panelEl.querySelectorAll('.lancamentoBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       if(!isAdmin) return;
+      refrescarGame();
       const card = btn.closest('[data-inscrito]');
       const studentId = Number(card.dataset.inscrito);
       const side = card.dataset.side;
@@ -7445,6 +7454,7 @@ function wireGameDetailPanelEvents(gameId, panelEl){
   });
   panelEl.querySelectorAll('.removeEvento').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      refrescarGame();
       const evId = Number(btn.closest('tr').dataset.evid);
       const eventoRemovido = sumula.eventos.find(e=>e.id===evId);
       if(!eventoRemovido) return;
