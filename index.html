@@ -4347,8 +4347,11 @@ function bindGeradorTabelaEvents(){
     wrap.querySelectorAll('.gtRemoveRegra').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const id = Number(btn.closest('.gt-regra-item').dataset.regra);
-        STATE.geradorTabela.regras = STATE.geradorTabela.regras.filter(x=>x.id!==id);
-        markDirty(); renderGeradorTabela();
+        const regra = STATE.geradorTabela.regras.find(x=>x.id===id);
+        showConfirm(`Remover a regra "${regra?regra.texto:''}"?`, ()=>{
+          STATE.geradorTabela.regras = STATE.geradorTabela.regras.filter(x=>x.id!==id);
+          markDirty(); renderGeradorTabela();
+        });
       });
     });
     const addRegraBtn = document.getElementById('gtAddRegra');
@@ -4418,8 +4421,11 @@ function bindGeradorTabelaEvents(){
       card.querySelectorAll('.gtRemoveBloqueio').forEach(btn=>{
         btn.addEventListener('click', ()=>{
           const bloqueioId = Number(btn.dataset.bloqueio);
-          local.bloqueios = (local.bloqueios||[]).filter(b=>b.id!==bloqueioId);
-          markDirty(); renderGeradorTabela();
+          const bloqueio = (local.bloqueios||[]).find(b=>b.id===bloqueioId);
+          showConfirm(`Remover o bloqueio "${bloqueio?bloqueio.inicio+'–'+bloqueio.fim:''}"${bloqueio&&bloqueio.motivo?` (${bloqueio.motivo})`:''}?`, ()=>{
+            local.bloqueios = (local.bloqueios||[]).filter(b=>b.id!==bloqueioId);
+            markDirty(); renderGeradorTabela();
+          });
         });
       });
     });
@@ -6975,7 +6981,7 @@ function renderCheckinsBody(){
     const inscrito = STATE.inscritos.find(a=>a.id===c.studentId);
     const dt = new Date(c.ts);
     return `<tr data-id="${c.id}">
-      <td>${inscrito?inscrito.nome:'Inscrito removido'}</td>
+      <td>${inscrito?escPdf(inscrito.nome):'Inscrito removido'}</td>
       <td>${inscrito?teamChip(inscrito.teamId, inscrito.genero):'—'}</td>
       <td class="mono">${dt.toLocaleDateString('pt-BR')}</td>
       <td class="mono">${dt.toLocaleTimeString('pt-BR')}</td>
