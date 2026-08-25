@@ -4421,16 +4421,23 @@ function bindGeradorTabelaEvents(){
 
     wrap.querySelectorAll('.gt-local-card').forEach(card=>{
       const localId = Number(card.dataset.local);
-      const local = STATE.geradorTabela.locais.find(l=>l.id===localId);
+      let local = STATE.geradorTabela.locais.find(l=>l.id===localId);
       if(!local) return;
-      card.querySelector('.gtNome').addEventListener('input', e=>{ local.nome=e.target.value; markDirty(); });
-      card.querySelector('.gtDataInicio').addEventListener('change', e=>{ local.dataInicio=e.target.value; markDirty(); renderGeradorTabela(); });
-      card.querySelector('.gtDataFim').addEventListener('change', e=>{ local.dataFim=e.target.value; markDirty(); renderGeradorTabela(); });
-      card.querySelector('.gtHoraInicio').addEventListener('change', e=>{ local.horaInicio=e.target.value; markDirty(); renderGeradorTabela(); });
-      card.querySelector('.gtHoraFim').addEventListener('change', e=>{ local.horaFim=e.target.value; markDirty(); renderGeradorTabela(); });
-      card.querySelector('.gtDuracao').addEventListener('change', e=>{ local.duracaoJogo=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
-      card.querySelector('.gtTecnico').addEventListener('change', e=>{ local.tempoTecnico=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
+      // Mesmo problema corrigido antes no painel de jogo: sincronização substitui o
+      // OBJETO inteiro no array (não muda propriedades nele), então um card já
+      // renderizado que capturou `local` antes de um pull concorrente (outro admin
+      // editando esse mesmo local) ficaria com uma referência órfã — editar depois
+      // perderia a mudança em silêncio. Chamada no início de cada handler.
+      const refrescarLocal = ()=>{ const atual = STATE.geradorTabela.locais.find(l=>l.id===localId); if(atual) local = atual; return local; };
+      card.querySelector('.gtNome').addEventListener('input', e=>{ refrescarLocal(); local.nome=e.target.value; markDirty(); });
+      card.querySelector('.gtDataInicio').addEventListener('change', e=>{ refrescarLocal(); local.dataInicio=e.target.value; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtDataFim').addEventListener('change', e=>{ refrescarLocal(); local.dataFim=e.target.value; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtHoraInicio').addEventListener('change', e=>{ refrescarLocal(); local.horaInicio=e.target.value; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtHoraFim').addEventListener('change', e=>{ refrescarLocal(); local.horaFim=e.target.value; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtDuracao').addEventListener('change', e=>{ refrescarLocal(); local.duracaoJogo=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
+      card.querySelector('.gtTecnico').addEventListener('change', e=>{ refrescarLocal(); local.tempoTecnico=Number(e.target.value)||0; markDirty(); renderGeradorTabela(); });
       card.querySelector('.gtDuplicarLocal').addEventListener('click', ()=>{
+        refrescarLocal();
         const copia = {
           ...local,
           id: nextGtLocalId(),
@@ -4442,12 +4449,14 @@ function bindGeradorTabelaEvents(){
         markDirty(); renderGeradorTabela();
       });
       card.querySelector('.gtRemoveLocal').addEventListener('click', ()=>{
+        refrescarLocal();
         showConfirm(`Remover o local "${local.nome}"?`, ()=>{
           STATE.geradorTabela.locais = STATE.geradorTabela.locais.filter(l=>l.id!==localId);
           markDirty(); renderGeradorTabela();
         });
       });
       card.querySelector('.gtAddBloqueio').addEventListener('click', ()=>{
+        refrescarLocal();
         const inicio = card.querySelector('.gtBloqueioInicio').value;
         const fim = card.querySelector('.gtBloqueioFim').value;
         const motivo = card.querySelector('.gtBloqueioMotivo').value.trim();
@@ -4459,6 +4468,7 @@ function bindGeradorTabelaEvents(){
       });
       card.querySelectorAll('.gtRemoveBloqueio').forEach(btn=>{
         btn.addEventListener('click', ()=>{
+          refrescarLocal();
           const bloqueioId = Number(btn.dataset.bloqueio);
           const bloqueio = (local.bloqueios||[]).find(b=>b.id===bloqueioId);
           showConfirm(`Remover o bloqueio "${bloqueio?bloqueio.inicio+'–'+bloqueio.fim:''}"${bloqueio&&bloqueio.motivo?` (${bloqueio.motivo})`:''}?`, ()=>{
@@ -4478,10 +4488,13 @@ function bindGeradorTabelaEvents(){
   if(gtWizardStep===3){
     wrap.querySelectorAll('.gt-mod-card').forEach(card=>{
       const localId = Number(card.dataset.local);
-      const local = STATE.geradorTabela.locais.find(l=>l.id===localId);
-      if(!local) return;
+      if(!STATE.geradorTabela.locais.find(l=>l.id===localId)) return;
       card.querySelectorAll('.gtModCheck').forEach(chk=>{
         chk.addEventListener('change', ()=>{
+          // busca o local de novo a cada clique (não guarda referência) -- mesmo motivo
+          // da correção nos outros pontos do Gerador de Tabela e no painel de jogo.
+          const local = STATE.geradorTabela.locais.find(l=>l.id===localId);
+          if(!local) return;
           const m = chk.value;
           if(chk.checked){ if(!local.modalidades.includes(m)) local.modalidades.push(m); }
           else { local.modalidades = local.modalidades.filter(x=>x!==m); }
