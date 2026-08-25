@@ -2669,13 +2669,41 @@ async function syncPuxarNovidades(){
    Guardadas como arquivo de verdade (não texto) no Supabase Storage — é a ÚNICA cópia
    que existe; qualquer visitante busca de lá (ver ARMAZENAMENTO DE IMAGENS, acima). */
 function syncStorageUrl(ref){ return `${SUPABASE_URL}/storage/v1/object/public/${SYNC_STORAGE_BUCKET}/${encodeURIComponent(ref)}.png`; }
+/* Referências de imagem cujo ENVIO falhou (rede instável, Storage fora do ar) e ainda
+   não foi confirmado com sucesso — diferente do texto/referência em si (que já sincroniza
+   com retry automático, ver correção em syncEnviarPendentes()), o upload da imagem de
+   verdade era "melhor esforço": se falhasse, o erro era simplesmente engolido, sem
+   nenhuma nova tentativa depois. Isso deixava a REFERÊNCIA (ex.: "header_logo") apontando
+   pra um arquivo que nunca chegou a existir no Storage — outros dispositivos veriam a
+   referência salva, mas a imagem quebrada, sem nenhum jeito automático de se recuperar. */
+const syncImagensPendentesEnvio = new Set();
+async function syncEnviarImagemComRetry(ref, dataUrl){
+  const ok = await syncEnviarImagem(ref, dataUrl);
+  if(ok) syncImagensPendentesEnvio.delete(ref);
+  else syncImagensPendentesEnvio.add(ref);
+}
+/* Tenta reenviar, a cada ciclo de sincronização, qualquer imagem cujo envio tenha
+   falhado antes — usando a mesma data URL já em cache (IMG_CACHE), sem precisar que o
+   admin refaça o upload manualmente. Se a imagem não existe mais localmente (removida
+   ou substituída nesse meio tempo), simplesmente descarta a tentativa antiga. */
+async function syncRetentarImagensPendentes(){
+  if(syncImagensPendentesEnvio.size===0) return;
+  await Promise.all(Array.from(syncImagensPendentesEnvio).map(ref=>{
+    const dataUrl = imgGet(ref);
+    if(!dataUrl){ syncImagensPendentesEnvio.delete(ref); return Promise.resolve(); }
+    return syncEnviarImagemComRetry(ref, dataUrl);
+  }));
+}
 async function syncEnviarImagem(ref, dataUrl){
-  if(!dataUrl) return;
+  if(!dataUrl) return true; // nada a enviar — considera concluído
   try{
     const blob = await (await fetch(dataUrl)).blob();
     await syncRequisicao('POST', `/storage/v1/object/${SYNC_STORAGE_BUCKET}/${encodeURIComponent(ref)}.png`, blob,
       { 'Content-Type':'image/png', 'x-upsert':'true' }, true);
-  }catch(e){ /* melhor esforço — o cache em memória (IMG_CACHE) mantém a imagem enquanto a aba estiver aberta, mesmo se isso falhar */ }
+    return true;
+  }catch(e){
+    return false; // melhor esforço — o cache em memória (IMG_CACHE) mantém a imagem enquanto a aba estiver aberta; syncRetentarImagensPendentes() tenta de novo no próximo ciclo
+  }
 }
 async function syncBaixarImagemSeNecessario(ref){
   if(!ref || imgGet(ref)) return;
@@ -2734,6 +2762,7 @@ async function syncCiclo(){
       const enviadas = await syncEnviarPendentes();
       const aplicadas = await syncPuxarNovidades();
       if(aplicadas>0) syncAtualizarRetratoPosPull();
+      await syncRetentarImagensPendentes(); // reenvia qualquer logo/foto cujo upload tenha falhado num ciclo anterior
       syncStatus = 'ok';
       syncLastSuccessAt = new Date();
       syncLastErrorMsg = '';
@@ -2788,10 +2817,11 @@ function imgGet(ref){
 function imgSet(ref, dataUrl){
   if(!dataUrl){
     IMG_CACHE.delete(ref);
+    syncImagensPendentesEnvio.delete(ref);
     return '';
   }
   IMG_CACHE.set(ref, dataUrl);
-  syncEnviarImagem(ref, dataUrl); // envia para o Supabase Storage — é a única cópia que existe
+  syncEnviarImagemComRetry(ref, dataUrl); // envia para o Supabase Storage — é a única cópia que existe
   return ref;
 }
 
