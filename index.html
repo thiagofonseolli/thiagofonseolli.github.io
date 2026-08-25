@@ -3293,7 +3293,7 @@ function renderJogos(){
     <h2>Jogos — Esportes Coletivos</h2>
     <p class="hint">Vitória = ${STATE.regras.vitoria} pts · Empate = ${STATE.regras.empate} pts · Derrota = ${STATE.regras.derrota} pts · W.O. = ${STATE.regras.wo} pts para quem faltou (adversário recebe ${STATE.regras.vitoria} pts). Marque também o conceito de Jogo Limpo (A a E) de cada equipe. <em>Esses valores podem ser alterados na aba "Edital (Regulamento)".</em></p>
     <div class="row" style="margin-bottom:6px;">
-      <div class="field"><label class="f-label">Modalidade</label><select id="fModalidade">${modalidadesOpts.map(([v,l])=>`<option value="${v}" ${filtroModalidade===v?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Modalidade</label><select id="fModalidade">${modalidadesOpts.map(([v,l])=>`<option value="${escPdf(v)}" ${filtroModalidade===v?'selected':''}>${escPdf(l)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="fGenero">${generos.map(([v,l])=>`<option value="${v}" ${filtroGenero===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Status</label><select id="fStatus">${status.map(([v,l])=>`<option value="${v}" ${filtroStatus===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="btnProximoPendente">⏭️ Próximo jogo pendente</button></div>
@@ -3315,7 +3315,7 @@ function renderJogos(){
       <h2 style="font-size:15px;">Adicionar jogo manualmente</h2>
       <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes). Data/Hora/Local são opcionais aqui — dá pra preencher depois, dentro do jogo.</p>
       <div class="row">
-        <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}</select></div>
+        <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${escPdf(m)}">${escPdf(m)}</option>`).join('')}</select></div>
         <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
         <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${ngTeamOptionsHtml('F')}</select></div>
         <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${ngTeamOptionsHtml('F')}</select></div>
@@ -4775,7 +4775,7 @@ function renderTeamsBody(){
 }
 function renderModalidadesChips(){
   const el = document.getElementById('modalidadesChips');
-  el.innerHTML = STATE.modalidades.map(m=>`<span class="chip">${m} ${isAdmin?`<button data-mod="${m}" class="removeMod">✕</button>`:''}</span>`).join('');
+  el.innerHTML = STATE.modalidades.map(m=>`<span class="chip">${escPdf(m)} ${isAdmin?`<button data-mod="${escPdf(m)}" class="removeMod">✕</button>`:''}</span>`).join('');
   el.querySelectorAll('.removeMod').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const mod = btn.dataset.mod;
@@ -5434,7 +5434,7 @@ function renderInscritosContentHtml(){
       </div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
-      <div class="row" id="alModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="alModCheck" value="${o.key}" ${adminDisabled()}> ${escPdf(o.label)}</label>`).join('')}</div>
+      <div class="row" id="alModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="alModCheck" value="${escPdf(o.key)}" ${adminDisabled()}> ${escPdf(o.label)}</label>`).join('')}</div>
     </div>
     <div class="row" style="margin-top:14px; align-items:flex-start;">
       <div class="field">
@@ -5472,7 +5472,7 @@ function renderInscritosContentHtml(){
       </select></div>
       <div class="field"><label class="f-label">Filtrar por modalidade</label><select id="alFiltroMod">
         <option value="todas">Todas as modalidades</option>
-        ${modOptions.map(o=>`<option value="${o.key}" ${inscritoFiltroModalidade===o.key?'selected':''}>${escPdf(o.label)}</option>`).join('')}
+        ${modOptions.map(o=>`<option value="${escPdf(o.key)}" ${inscritoFiltroModalidade===o.key?'selected':''}>${escPdf(o.label)}</option>`).join('')}
       </select></div>
       <div class="field"><label class="f-label">Filtrar por gênero</label><select id="alFiltroGenero">
         <option value="todos" ${inscritoFiltroGenero==='todos'?'selected':''}>Todos</option>
@@ -5602,10 +5602,10 @@ function renderInscritosBody(){
     <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
     <td>${escPdf(a.nome)}</td><td>${teamChip(a.teamId, a.genero)}</td>
     <td>${a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'<span class="hint">—</span>'}</td>
-    <td class="mono">${a.codigo||'—'}</td>
-    <td>${a.restricaoAlimentar ? `🍽️ ${a.restricoesAlimentares}` : '<span class="hint">Não</span>'}</td>
-    <td>${a.alergiaMedicamento ? `🏥 ${a.alergias}` : '<span class="hint">Não</span>'}</td>
-    <td>${(a.modalidades||[]).map(m=>`<span class="chip">${modLabel(m)}</span>`).join('') || '<span class="hint">—</span>'}</td>
+    <td class="mono">${escPdf(a.codigo||'—')}</td>
+    <td>${a.restricaoAlimentar ? `🍽️ ${escPdf(a.restricoesAlimentares)}` : '<span class="hint">Não</span>'}</td>
+    <td>${a.alergiaMedicamento ? `🏥 ${escPdf(a.alergias)}` : '<span class="hint">Não</span>'}</td>
+    <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
     <td><button class="btn secondary small gerarCrachaBtn">🪪 Gerar crachá</button></td>
     <td><button class="btn secondary small editInscritoBtn" ${adminDisabled()}>✏️ Editar</button></td>
     <td><button class="btn danger small removeInscrito" ${adminDisabled()}>✕ Remover</button></td></tr>`;
@@ -5660,7 +5660,7 @@ function openEditInscritoModal(id){
 
   const modOptions = inscritoModalidadeOptions();
   const modosChecks = document.getElementById('editInscritoModalidadesChecks');
-  modosChecks.innerHTML = modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="editAlModCheck" value="${o.key}" ${(a.modalidades||[]).includes(o.key)?'checked':''}> ${escPdf(o.label)}</label>`).join('');
+  modosChecks.innerHTML = modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="editAlModCheck" value="${escPdf(o.key)}" ${(a.modalidades||[]).includes(o.key)?'checked':''}> ${escPdf(o.label)}</label>`).join('');
 
   const temRestricao = !!a.restricaoAlimentar;
   document.getElementById('editInscritoTemRestricao').value = temRestricao ? 'sim' : 'nao';
@@ -6701,17 +6701,17 @@ function finalizarRegistroAlimentacao(inscrito, origemInputId){
   const dataRegistro = new Date(ts).toLocaleDateString('pt-BR');
   const horario = new Date(ts).toLocaleTimeString('pt-BR');
   let modalHtml = `<h2 style="color:var(--navy); margin-top:0;">Alimentação registrada</h2>
-    <p><strong>${escPdf(inscrito.nome)}</strong> (${teamChip(inscrito.teamId, inscrito.genero)}) — código: <span class="mono">${inscrito.codigo||'—'}</span><br>Data: <span class="mono">${dataRegistro}</span> — Horário: <span class="mono">${horario}</span></p>`;
+    <p><strong>${escPdf(inscrito.nome)}</strong> (${teamChip(inscrito.teamId, inscrito.genero)}) — código: <span class="mono">${escPdf(inscrito.codigo||'—')}</span><br>Data: <span class="mono">${dataRegistro}</span> — Horário: <span class="mono">${horario}</span></p>`;
   if(!inscrito.restricaoAlimentar || !inscrito.restricoesAlimentares){
     modalHtml += `<p style="color:var(--green); font-weight:600;">✅ Não há restrições para o estudante no cardápio.</p>`;
   } else {
     const evitar = pratosParaEvitar(inscrito, dataStr);
-    modalHtml += `<p><strong>Restrições cadastradas:</strong> ${inscrito.restricoesAlimentares}</p>`;
+    modalHtml += `<p><strong>Restrições cadastradas:</strong> ${escPdf(inscrito.restricoesAlimentares)}</p>`;
     if(evitar.length===0){
       modalHtml += `<p style="color:var(--green); font-weight:600;">✅ Nenhum prato do cardápio de hoje (${dataRegistro}) contém esses itens.</p>`;
     } else {
       modalHtml += `<p style="color:var(--crimson); font-weight:700;">⚠️ Pratos de hoje que devem ser evitados:</p>
-        <ul>${evitar.map(m=>`<li><strong>${m.prato}</strong> — contém "${m.item}"</li>`).join('')}</ul>`;
+        <ul>${evitar.map(m=>`<li><strong>${escPdf(m.prato)}</strong> — contém "${escPdf(m.item)}"</li>`).join('')}</ul>`;
     }
   }
   openFeedingModal(modalHtml);
@@ -6934,8 +6934,8 @@ function renderCardapioBody(){
   if(list.length===0){ body.innerHTML = `<tr><td colspan="4" class="hint">Nenhum item cadastrado no cardápio para este dia.</td></tr>`; return; }
   body.innerHTML = list.map(c=>`<tr data-id="${c.id}">
     <td class="mono">${formatDateBR(c.data)}</td>
-    <td>${c.prato}</td>
-    <td>${c.itens}</td>
+    <td>${escPdf(c.prato)}</td>
+    <td>${escPdf(c.itens)}</td>
     <td>${isAdmin?'<button class="btn danger small removeCardapio">✕ Remover</button>':''}</td>
   </tr>`).join('');
   body.querySelectorAll('.removeCardapio').forEach(btn=>{
@@ -8190,7 +8190,7 @@ function openPainelModal(){
     <img src="${LOGO_MARISTA_B64}" alt="Colégio Marista São José-Montes Claros">
     <img src="${LOGO_NAC_B64}" alt="NAC — Núcleo de Atividades Complementares">
   </div>`;
-  document.getElementById('painelModalContent').innerHTML = printHeader + `<h2 style="color:var(--navy); margin-top:0;">${STATE.eventName} — Classificação Geral</h2>` + classificacaoHtml();
+  document.getElementById('painelModalContent').innerHTML = printHeader + `<h2 style="color:var(--navy); margin-top:0;">${escPdf(STATE.eventName)} — Classificação Geral</h2>` + classificacaoHtml();
   document.getElementById('painelModal').classList.add('open');
 }
 function closePainelModal(){ document.getElementById('painelModal').classList.remove('open'); }
