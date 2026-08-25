@@ -2444,7 +2444,28 @@ function syncConstruirLinha(tabela, registroId){
   return {...base, dados:null, deletado:true};
 }
 /* Aplica uma linha recebida de outro dispositivo em STATE. */
+/* Verdadeiro se HÁ uma edição local pendente (ainda não confirmada como enviada) pra
+   esse registro específico — comparando o valor ATUAL contra o último retrato
+   conhecido, não só olhando se já está em syncPendentes (que pode ainda não ter sido
+   atualizado, dependendo do timing exato entre uma edição e o debounce do auto-save).
+   Usada antes de aplicar QUALQUER linha recebida de um PULL, em qualquer tabela — sem
+   isso, uma sincronização em segundo plano que "cruza" bem no meio de uma edição (ex.:
+   trocar a senha, editar uma equipe, lançar um placar) pode sobrescrever silenciosamente
+   a mudança local antes mesmo dela ter sido enviada. Ao detectar isso, marca a chave
+   como pendente explicitamente, garantindo que ela vai no próximo envio em vez de ser
+   perdida. Ver correção original (bug relatado: senha de admin "voltando sozinha"). */
+function syncTemEdicaoLocalPendente(tabela, registroId){
+  const jsonAtual = JSON.stringify(syncConstruirLinha(tabela, registroId).dados);
+  const retrato = syncUltimoRetrato[tabela] || {};
+  const jsonConhecido = retrato[registroId];
+  if(jsonConhecido!==undefined && jsonAtual!==jsonConhecido){
+    syncMarcarPendente(tabela, registroId);
+    return true;
+  }
+  return false;
+}
 function syncColecaoAplicarLinha(nomeColecao, linha){
+  if(syncTemEdicaoLocalPendente(nomeColecao, linha.registro_id)) return;
   const cfg = SYNC_COLECOES[nomeColecao];
   const arr = cfg.lista();
   const idx = arr.findIndex(x=> String(x[cfg.idField])===String(linha.registro_id));
@@ -2469,23 +2490,27 @@ function syncAplicarLinha(linha){
   const {tabela, registro_id, dados, deletado} = linha;
   if(SYNC_COLECOES[tabela]){ syncColecaoAplicarLinha(tabela, linha); return; }
   if(tabela==='modalidades'){
+    if(syncTemEdicaoLocalPendente('modalidades', registro_id)) return;
     if(deletado) STATE.modalidades = STATE.modalidades.filter(m=>m!==registro_id);
     else if(dados && !STATE.modalidades.includes(dados.nome)) STATE.modalidades.push(dados.nome);
     return;
   }
   if(tabela==='individual' || tabela==='desfile' || tabela==='ajustes'){
+    if(syncTemEdicaoLocalPendente(tabela, registro_id)) return;
     const mapa = tabela==='individual' ? STATE.individual : tabela==='desfile' ? STATE.desfile : STATE.ajustes;
     if(deletado) delete mapa[registro_id];
     else if(dados!=null) mapa[registro_id] = dados;
     return;
   }
   if(tabela==='sumula_obs'){
+    if(syncTemEdicaoLocalPendente('sumula_obs', registro_id)) return;
     if(!STATE.sumulas[registro_id]) STATE.sumulas[registro_id] = {eventos:[], observacoes:''};
     if(dados) STATE.sumulas[registro_id].observacoes = dados.observacoes||'';
     return;
   }
   if(tabela==='sumula_evento'){ syncAplicarEvento(linha); return; }
   if(tabela==='inscrito_foto'){
+    if(syncTemEdicaoLocalPendente('inscrito_foto', registro_id)) return;
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
     if(a){ a.foto = deletado ? '' : (dados||''); if(a.foto) syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(a.foto)); }
     return;
@@ -2502,13 +2527,10 @@ function syncAplicarLinha(linha){
     // reproduz exatamente o sintoma relatado: "troquei a senha e ela voltou pra
     // original" — sem essa proteção, o próprio ciclo periódico de sincronização podia
     // fazer isso sozinho, sem precisar de um segundo dispositivo nem de nada digitado
-    // errado. Marca explicitamente como pendente, pra garantir que vai no próximo envio.
-    const jsonAtual = JSON.stringify(syncConstruirLinha('config', registro_id).dados);
-    const jsonConhecido = (syncUltimoRetrato['config']||{})[registro_id];
-    if(jsonConhecido!==undefined && jsonAtual!==jsonConhecido){
-      syncMarcarPendente('config', registro_id);
-      return;
-    }
+    // errado. A mesma proteção (syncTemEdicaoLocalPendente) agora vale pra TODAS as
+    // tabelas sincronizadas, não só "config" — ver aplicação em syncColecaoAplicarLinha()
+    // e nos outros blocos especiais acima.
+    if(syncTemEdicaoLocalPendente('config', registro_id)) return;
     if(registro_id==='eventName') STATE.eventName = dados;
     else if(registro_id==='headerTexto') STATE.header.subtitle = dados.subtitle||'';
     else if(registro_id==='headerLogoRef'){ STATE.header.logoDataUrl = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
