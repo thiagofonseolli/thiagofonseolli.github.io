@@ -216,7 +216,7 @@
         <img id="headerLogo" alt="Logo do evento" style="display:none; height:52px; max-width:120px; object-fit:contain; border-radius:6px; background:#fff; padding:4px;">
         <div class="brand-title">
           <div class="title-row">
-            <h1 id="eventTitle">44º JIM - 2026</h1>
+            <h1 id="eventTitle">Carregando…</h1>
             <span class="eyebrow" id="eyebrowText">Colégio Marista São José — Montes Claros</span>
             <button id="subtitleInfoBtn" class="info-icon" style="display:none;" title="Sobre este painel">ℹ️</button>
           </div>
@@ -1625,7 +1625,7 @@ function defaultState(){
   const teams = defaultTeams();
   const modalidades = defaultModalidades();
   return {
-    eventName: '44º JIM - 2026',
+    eventName: 'Carregando…',
     header: defaultHeader(),
     adminPasswordSalt: null,
     adminPasswordHash: null,
@@ -1901,7 +1901,7 @@ function renderEditalIndiceHtml(rawHtml){
 }
 
 function ensureDefaults(s){
-  if(!s.eventName) s.eventName = '44º JIM - 2026';
+  if(!s.eventName) s.eventName = 'Torneio'; // fallback pra um backup antigo/incompleto sem nome de evento salvo — diferente do "Carregando…" usado em defaultState() (esse aqui é aplicado na hora, não é um estado transitório de espera)
   // Migração: versões salvas antes desta mudança guardavam a senha em texto puro no campo
   // adminPassword. Ela é marcada aqui para ser hasheada de forma assíncrona logo após o
   // carregamento (ver finalizarSenhaAdminSeNecessario, chamada em init()) — o campo em texto
@@ -8391,6 +8391,32 @@ function renderViewOnlyBanner(){
   document.getElementById('main').before(banner);
 }
 
+/* Mensagem exibida em #main enquanto a primeira sincronização ainda não terminou —
+   atualiza sozinha a cada nova tentativa, pra deixar claro que o app não travou, só
+   está esperando o servidor responder de verdade (comum em hospedagens gratuitas, que
+   "hibernam" o banco depois de um tempo sem uso). */
+function atualizarTelaCarregamentoInicial(tentativas, confirmacoes){
+  const el = document.querySelector('#main .loading');
+  if(!el) return;
+  let msg = 'Aguarde… carregando os dados mais recentes.';
+  if(tentativas>0 || confirmacoes>0){
+    msg += ' Isso pode levar até um minuto quando o servidor precisa "acordar" depois de um tempo sem uso — comum em hospedagens gratuitas.';
+  }
+  el.textContent = msg;
+}
+/* Mostrada só se a primeira sincronização não conseguir confirmar dados de verdade
+   dentro do tempo limite (SYNC_INICIAL_TIMEOUT_MS) — em vez de seguir em frente
+   silenciosamente com um resultado que pode estar incompleto, para o carregamento aqui
+   e deixa a decisão de tentar de novo com a pessoa. Nenhum dado é alterado nesse caso. */
+function mostrarErroCarregamentoInicial(){
+  const main = document.getElementById('main');
+  if(!main) return;
+  main.innerHTML = `<div class="card" style="max-width:440px; margin:60px auto; text-align:center;">
+    <p style="font-weight:600; margin-bottom:8px; color:var(--navy);">Não foi possível confirmar os dados mais recentes</p>
+    <p class="hint" style="margin-bottom:18px;">Verifique sua conexão com a internet e tente novamente. Nenhuma informação foi alterada.</p>
+    <button class="btn" onclick="location.reload()">🔄 Tentar de novo</button>
+  </div>`;
+}
 (async function init(){
   // Sem localStorage: STATE começa vazio (defaultState) e só fica completo depois da
   // primeira sincronização com o Supabase, logo abaixo — é de lá que vêm todos os dados
@@ -8406,12 +8432,21 @@ function renderViewOnlyBanner(){
   // absorver esse atraso antes da busca de verdade, que decide o que a pessoa vê.
   try{ await syncRequisicao('GET', `/rest/v1/${SYNC_TABLE}?select=id&limit=1`); }catch(e){}
   // Espera a primeira sincronização dar certo de verdade antes de mostrar qualquer
-  // coisa — ver o comentário dentro de syncCiclo() sobre por que seguir adiante com uma
-  // falha aqui é perigoso (arrisca sobrescrever os dados reais da nuvem depois). Tenta
-  // de novo com espera crescente (1s, 2s, 4s... até 15s) enquanto não conseguir.
+  // coisa — nunca revela o painel com um estado "vazio"/desatualizado que só desistiu
+  // de esperar, disfarçado de versão final (foi exatamente esse sintoma relatado: a
+  // tela abria já "sem" os dados cadastrados, e só um tempo depois atualizava sozinha).
+  // Tenta de novo com espera crescente (1s, 2s, 4s... até 15s), dentro de um limite
+  // TOTAL de tempo — depois dele, mostra um erro com botão de tentar de novo, em vez de
+  // silenciosamente aceitar um resultado que pode só estar incompleto (banco ainda
+  // "acordando").
+  const SYNC_INICIAL_TIMEOUT_MS = 90000; // ~1,5 min no total -- generoso o bastante pra hibernação de plano gratuito, sem deixar a pessoa esperando pra sempre sem explicação
+  const inicioEspera = Date.now();
   let tentativaSyncInicial = 0;
   let confirmacoesDeVazio = 0;
+  let expirou = false;
   while(true){
+    if(Date.now()-inicioEspera > SYNC_INICIAL_TIMEOUT_MS){ expirou = true; break; }
+    atualizarTelaCarregamentoInicial(tentativaSyncInicial, confirmacoesDeVazio);
     await syncCiclo();
     if(!syncPrimeiroCicloFeito){
       tentativaSyncInicial++;
@@ -8424,13 +8459,17 @@ function renderViewOnlyBanner(){
     // que a nuvem realmente não tem nada (cenário legítimo: instalação nova, do zero),
     // confirma várias vezes, com espera crescente — bancos muito "dormentes" podem
     // levar bem mais que alguns segundos para responder de verdade.
-    if(syncUltimaPrimeiraPuxadaQtd===0 && confirmacoesDeVazio<6){
+    if(syncUltimaPrimeiraPuxadaQtd===0 && confirmacoesDeVazio<8){
       confirmacoesDeVazio++;
       syncPrimeiroCicloFeito = false; // repete o modo "só puxar" mais uma vez
       await new Promise(r=> setTimeout(r, Math.min(8000, 2000 * confirmacoesDeVazio)));
       continue;
     }
     break;
+  }
+  if(expirou){
+    mostrarErroCarregamentoInicial();
+    return; // não segue pro resto do init() -- a interface só é revelada quando os dados realmente chegam (ou a pessoa recarrega e tenta de novo)
   }
   syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
   // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
