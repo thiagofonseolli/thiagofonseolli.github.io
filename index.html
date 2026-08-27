@@ -8261,9 +8261,9 @@ function renderDesfileContentHtml(){
     </div>
   </div>` : ''}
 
-  <div class="card">
+  ${isAdmin ? `<div class="card">
     <h2 style="font-size:15px;">Lançar votos</h2>
-    ${total===0 ? `<p class="hint">${isAdmin?'Cadastre pelo menos um jurado acima antes de lançar votos.':'Nenhum jurado cadastrado ainda.'}</p>` : `
+    ${total===0 ? `<p class="hint">Cadastre pelo menos um jurado acima antes de lançar votos.</p>` : `
     <div class="field" style="margin-bottom:10px; max-width:280px;">
       <label class="f-label">Sou o(a) jurado(a):</label>
       <select id="desfileSelecaoJurado">
@@ -8272,7 +8272,7 @@ function renderDesfileContentHtml(){
       </select>
     </div>
     <div id="desfileVotosWrap"></div>`}
-  </div>
+  </div>` : ''}
 
   <div class="card">
     <h2 style="font-size:15px;">Resultado (média dos jurados)</h2>
