@@ -2968,6 +2968,27 @@ function clearResultadosJogos(){
   STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; g.wo=null; g.fpA=null; g.fpB=null; g.data=''; g.hora=''; g.local=''; });
 }
 function clearIndividualData(){ STATE.individual = {}; }
+const DESFILE_JURADO_LEGADO_ID = -1; // id reservado pro "jurado" que representa a nota já lançada antes de existir avaliação por múltiplos jurados
+/* Preserva uma nota de desfile já lançada pelo sistema antigo (editor único, antes desta
+   função existir) como se fosse o voto de um "jurado" especial chamado "Avaliação
+   anterior" — assim ela entra na média junto com os jurados de verdade, em vez de ser
+   silenciosamente substituída no primeiro voto real. Só migra se essa Equipe ainda não
+   tem NENHUM voto registrado (nem de jurado real, nem essa migração já feita antes) —
+   idempotente, seguro de chamar em toda renderização da aba. Retorna true se migrou algo
+   (pra saber se precisa marcar como alterado e salvar). */
+function migrarNotaLegadaSeNecessario(teamId){
+  const jaTemAlgumVoto = STATE.desfileJurados.some(j=> STATE.desfileVotos[teamId+'|'+j.id]!=null);
+  if(jaTemAlgumVoto) return false;
+  const legado = STATE.desfile[teamId];
+  if(!legado) return false;
+  const total = (legado.participacao||0)+(legado.organizacao||0)+(legado.performance||0)+(legado.postura||0);
+  if(total===0) return false; // nada de fato lançado antes — não precisa criar um voto "vazio"
+  if(!STATE.desfileJurados.some(j=>j.id===DESFILE_JURADO_LEGADO_ID)){
+    STATE.desfileJurados.push({id: DESFILE_JURADO_LEGADO_ID, nome:'Avaliação anterior (antes dos jurados)'});
+  }
+  STATE.desfileVotos[teamId+'|'+DESFILE_JURADO_LEGADO_ID] = {...legado};
+  return true;
+}
 /* Recalcula STATE.desfile[teamId] (o total usado na Classificação Geral) como a MÉDIA
    dos votos de todos os jurados que já avaliaram essa Equipe — chamada toda vez que um
    voto é lançado, editado, ou removido, seja localmente ou vindo de outro dispositivo
@@ -8215,6 +8236,14 @@ function nextDesfileJuradoId(){
   return (STATE.desfileJurados.reduce((m,j)=>Math.max(m,j.id),0)) + 1;
 }
 function renderDesfileContentHtml(){
+  // Preserva, como voto de um "jurado" especial, qualquer nota de desfile já lançada
+  // pelo sistema antigo (antes de existir avaliação por múltiplos jurados) — roda toda
+  // vez que a aba abre, ANTES de montar o HTML (assim a lista de jurados já aparece
+  // atualizada de primeira, sem precisar de um segundo re-render). Idempotente — só
+  // migra Equipes que ainda não têm voto nenhum registrado.
+  let migrouAlgo = false;
+  STATE.teams.forEach(t=>{ if(migrarNotaLegadaSeNecessario(t.id)) migrouAlgo = true; });
+  if(migrouAlgo) markDirty();
   const total = STATE.desfileJurados.length;
   return `<div class="card"><h2>Desfile de Abertura</h2>
     <p class="hint">Até 30 pontos por participação (10/20/30 conforme % de estudantes desfilando), mais até 10 pontos em cada um dos critérios de organização, performance e postura na arquibancada. Vários jurados podem avaliar — o total de cada Equipe usado na Classificação Geral é a <strong>média</strong> dos votos lançados para ela.</p>
@@ -8257,10 +8286,18 @@ function renderDesfileVotosWrap(){
   if(!desfileJuradoSelecionado){ wrap.innerHTML = `<p class="hint">Escolha seu nome acima para lançar (ou revisar) seus votos.</p>`; return; }
   const jurado = STATE.desfileJurados.find(j=>j.id===desfileJuradoSelecionado);
   if(!jurado){ desfileJuradoSelecionado = null; wrap.innerHTML = ''; return; }
-  wrap.innerHTML = `<table><thead><tr><th>equipe</th><th>Participação (0/10/20/30)</th><th>Organização (0–10)</th><th>Performance (0–10)</th><th>Postura (0–10)</th><th>Meu total</th></tr></thead><tbody id="desfileVotosBody"></tbody></table>`;
+  // O voto só entra na média depois de clicar em "Salvar" nessa linha — não a cada
+  // tecla digitada. Sem isso, um jurado ainda no meio do preenchimento (ex.: só marcou
+  // "Participação" e não chegou nos outros 3 critérios) já entraria na conta com os
+  // critérios restantes valendo zero, derrubando a média de uma Equipe temporariamente
+  // enquanto alguém ainda está avaliando — visível pra quem estiver olhando o
+  // "Resultado" ao vivo nesse meio-tempo.
+  wrap.innerHTML = `<p class="hint">Preencha os 4 critérios de cada Equipe e clique em "Salvar" — só entra na média depois de salvo.</p>
+    <table><thead><tr><th>equipe</th><th>Participação (0/10/20/30)</th><th>Organização (0–10)</th><th>Performance (0–10)</th><th>Postura (0–10)</th><th>Prévia</th><th></th></tr></thead><tbody id="desfileVotosBody"></tbody></table>`;
   const body = document.getElementById('desfileVotosBody');
   body.innerHTML = STATE.teams.map(t=>{
     const chave = t.id+'|'+jurado.id;
+    const jaSalvo = STATE.desfileVotos[chave]!=null;
     const v = STATE.desfileVotos[chave] || {participacao:0, organizacao:0, performance:0, postura:0};
     const total = (v.participacao||0)+(v.organizacao||0)+(v.performance||0)+(v.postura||0);
     return `<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
@@ -8268,12 +8305,26 @@ function renderDesfileVotosWrap(){
       <td><input type="number" class="vOrganizacao" min="0" max="10" value="${v.organizacao||0}" ${adminDisabled()}></td>
       <td><input type="number" class="vPerformance" min="0" max="10" value="${v.performance||0}" ${adminDisabled()}></td>
       <td><input type="number" class="vPostura" min="0" max="10" value="${v.postura||0}" ${adminDisabled()}></td>
-      <td class="mono totalCell">${total}</td></tr>`;
+      <td class="mono totalCell">${total}</td>
+      <td>${isAdmin?`<button class="btn secondary small salvarVotoLinha" data-team="${t.id}">💾 ${jaSalvo?'Atualizar':'Salvar'}</button> <span class="hint statusVoto" style="margin:0;">${jaSalvo?'✅ salvo':'não salvo ainda'}</span>`:''}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr').forEach(tr=>{
     const teamId = tr.dataset.team;
     const chave = teamId+'|'+jurado.id;
-    const update = ()=>{
+    // Atualiza só a prévia (visual, não grava nada) a cada mudança nos campos —
+    // ajuda a conferir a soma antes de salvar, sem contar na média ainda.
+    const atualizarPreviaESalvo = ()=>{
+      const p = Number(tr.querySelector('.vParticipacao').value)||0;
+      const o = Math.max(0,Math.min(10,Number(tr.querySelector('.vOrganizacao').value)||0));
+      const pf = Math.max(0,Math.min(10,Number(tr.querySelector('.vPerformance').value)||0));
+      const ps = Math.max(0,Math.min(10,Number(tr.querySelector('.vPostura').value)||0));
+      tr.querySelector('.totalCell').textContent = p+o+pf+ps;
+      const statusEl = tr.querySelector('.statusVoto');
+      if(statusEl) statusEl.textContent = 'alterado, não salvo';
+    };
+    tr.querySelectorAll('select, input').forEach(inp=>{ inp.addEventListener('change', atualizarPreviaESalvo); inp.addEventListener('input', atualizarPreviaESalvo); });
+    const salvarBtn = tr.querySelector('.salvarVotoLinha');
+    if(salvarBtn) salvarBtn.addEventListener('click', ()=>{
       const v = {
         participacao: Number(tr.querySelector('.vParticipacao').value)||0,
         organizacao: Math.max(0,Math.min(10,Number(tr.querySelector('.vOrganizacao').value)||0)),
@@ -8281,11 +8332,12 @@ function renderDesfileVotosWrap(){
         postura: Math.max(0,Math.min(10,Number(tr.querySelector('.vPostura').value)||0)),
       };
       STATE.desfileVotos[chave] = v;
-      tr.querySelector('.totalCell').textContent = v.participacao+v.organizacao+v.performance+v.postura;
       recomputarDesfileMedia(teamId);
       markDirty(); renderScoreboard(); renderDesfileBody();
-    };
-    tr.querySelectorAll('select, input').forEach(inp=>{ inp.addEventListener('change', update); inp.addEventListener('input', update); });
+      salvarBtn.textContent = '💾 Atualizar';
+      const statusEl = tr.querySelector('.statusVoto');
+      if(statusEl) statusEl.textContent = '✅ salvo';
+    });
   });
 }
 function bindDesfileEvents(){
