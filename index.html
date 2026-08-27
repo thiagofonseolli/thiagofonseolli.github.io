@@ -1632,6 +1632,7 @@ function defaultState(){
     teams, modalidades,
     games: buildAllGames(teams, modalidades),
     individual: {}, desfile: {}, ajustes: {}, inscritos: [],
+    desfileJurados: [], desfileVotos: {}, // avaliação do desfile por múltiplos jurados — STATE.desfile[teamId] passa a ser a MÉDIA calculada dos votos, não mais editado direto
     modalidadesIndividuais: defaultModalidadesIndividuais(),
     modalidadesArtisticas: [],
     sumulas: {}, sumulaTipos: defaultSumulaTipos(),
@@ -2356,6 +2357,7 @@ const SYNC_COLECOES = {
   aglutinadores:           { lista: ()=> STATE.aglutinadores,           idField: 'id' },
   cardapio:                { lista: ()=> STATE.cardapio,                idField: 'id' },
   criteriosPersonalizados: { lista: ()=> STATE.criteriosPersonalizados, idField: 'id' },
+  desfileJurados:          { lista: ()=> STATE.desfileJurados,          idField: 'id' },
   geradorLocais:           { lista: ()=> STATE.geradorTabela.locais,    idField: 'id' },
   geradorRegras:           { lista: ()=> STATE.geradorTabela.regras,    idField: 'id' },
   checkins:                { lista: ()=> STATE.checkins,                idField: 'id' },
@@ -2370,7 +2372,7 @@ const SYNC_COLECOES = {
 };
 // Nomes de tabela que não são uma lista simples (formatos especiais, tratados à parte
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
-const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','ajustes','sumula_obs','inscrito_foto','config'];
+const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','inscrito_foto','config'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
 const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth'];
 
@@ -2388,6 +2390,7 @@ function syncListarIdsAtuais(tabela){
   if(tabela==='modalidades') return STATE.modalidades.slice();
   if(tabela==='individual') return Object.keys(STATE.individual);
   if(tabela==='desfile') return Object.keys(STATE.desfile);
+  if(tabela==='desfileVotos') return Object.keys(STATE.desfileVotos);
   if(tabela==='ajustes') return Object.keys(STATE.ajustes);
   if(tabela==='sumula_obs') return Object.keys(STATE.sumulas);
   if(tabela==='inscrito_foto') return STATE.inscritos.map(a=>String(a.id));
@@ -2410,8 +2413,8 @@ function syncConstruirLinha(tabela, registroId){
     const existe = STATE.modalidades.includes(registroId);
     return {...base, dados: existe ? {nome:registroId} : null, deletado: !existe};
   }
-  if(tabela==='individual' || tabela==='desfile' || tabela==='ajustes'){
-    const mapa = tabela==='individual' ? STATE.individual : tabela==='desfile' ? STATE.desfile : STATE.ajustes;
+  if(tabela==='individual' || tabela==='desfile' || tabela==='desfileVotos' || tabela==='ajustes'){
+    const mapa = tabela==='individual' ? STATE.individual : tabela==='desfile' ? STATE.desfile : tabela==='desfileVotos' ? STATE.desfileVotos : STATE.ajustes;
     const existe = Object.prototype.hasOwnProperty.call(mapa, registroId) && Object.keys(mapa[registroId]||{}).length>=0 && mapa[registroId]!=null;
     return {...base, dados: existe ? mapa[registroId] : null, deletado: !existe};
   }
@@ -2500,6 +2503,16 @@ function syncAplicarLinha(linha){
     const mapa = tabela==='individual' ? STATE.individual : tabela==='desfile' ? STATE.desfile : STATE.ajustes;
     if(deletado) delete mapa[registro_id];
     else if(dados!=null) mapa[registro_id] = dados;
+    return;
+  }
+  if(tabela==='desfileVotos'){
+    if(syncTemEdicaoLocalPendente('desfileVotos', registro_id)) return;
+    if(deletado) delete STATE.desfileVotos[registro_id];
+    else if(dados!=null) STATE.desfileVotos[registro_id] = dados;
+    // O voto de um jurado chegando de outro dispositivo muda a média — recalcula
+    // STATE.desfile[teamId] (a chave é "teamId|juradoId") pra refletir o novo total.
+    const teamId = String(registro_id).split('|')[0];
+    if(teamId) recomputarDesfileMedia(teamId);
     return;
   }
   if(tabela==='sumula_obs'){
@@ -2955,7 +2968,37 @@ function clearResultadosJogos(){
   STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; g.wo=null; g.fpA=null; g.fpB=null; g.data=''; g.hora=''; g.local=''; });
 }
 function clearIndividualData(){ STATE.individual = {}; }
-function clearDesfileData(){ STATE.desfile = {}; }
+/* Recalcula STATE.desfile[teamId] (o total usado na Classificação Geral) como a MÉDIA
+   dos votos de todos os jurados que já avaliaram essa Equipe — chamada toda vez que um
+   voto é lançado, editado, ou removido, seja localmente ou vindo de outro dispositivo
+   via sincronização. Jurados que ainda não votaram nessa Equipe não entram na conta
+   (não seria justo contar como "zero" um jurado que só ainda não terminou de avaliar).
+   Arredonda pra 1 casa decimal, evitando dízimas feias tipo 16.66666666. */
+function recomputarDesfileMedia(teamId){
+  const votos = STATE.desfileJurados
+    .map(j=> STATE.desfileVotos[teamId+'|'+j.id])
+    .filter(v=> v!=null);
+  if(votos.length===0){
+    delete STATE.desfile[teamId];
+    return;
+  }
+  const soma = {participacao:0, organizacao:0, performance:0, postura:0};
+  votos.forEach(v=>{
+    soma.participacao += Number(v.participacao)||0;
+    soma.organizacao += Number(v.organizacao)||0;
+    soma.performance += Number(v.performance)||0;
+    soma.postura += Number(v.postura)||0;
+  });
+  const n = votos.length;
+  const arred1 = x => Math.round((x/n)*10)/10;
+  STATE.desfile[teamId] = {
+    participacao: arred1(soma.participacao),
+    organizacao: arred1(soma.organizacao),
+    performance: arred1(soma.performance),
+    postura: arred1(soma.postura),
+  };
+}
+function clearDesfileData(){ STATE.desfile = {}; STATE.desfileVotos = {}; }
 function clearAjustesData(){ STATE.ajustes = {}; }
 function clearCriteriosData(){ STATE.criteriosPersonalizados = []; }
 function clearInscritosData(){
@@ -2973,7 +3016,7 @@ function clearTudoFactory(){
   STATE.modalidadesIndividuais = defaultModalidadesIndividuais();
   STATE.games = [];
   STATE.inscritos.forEach(a=> imgSet('foto_'+a.id, null));
-  STATE.individual = {}; STATE.desfile = {}; STATE.ajustes = {}; STATE.inscritos = [];
+  STATE.individual = {}; STATE.desfile = {}; STATE.desfileVotos = {}; STATE.desfileJurados = []; STATE.ajustes = {}; STATE.inscritos = [];
   STATE.sumulas = {}; STATE.sumulaTipos = defaultSumulaTipos();
   STATE.cardapio = []; STATE.checkins = [];
   STATE.criteriosPersonalizados = [];
@@ -4882,6 +4925,7 @@ function renderTeamsBody(){
         idsRemovidos.forEach(gid=> delete STATE.sumulas[gid]);
         Object.keys(STATE.individual).forEach(k=> delete STATE.individual[k][id]);
         delete STATE.desfile[id];
+        STATE.desfileJurados.forEach(j=> delete STATE.desfileVotos[id+'|'+j.id]);
         delete STATE.ajustes[id];
         STATE.criteriosPersonalizados.forEach(c=> delete c.pontos[id]);
         STATE.inscritos.filter(a=> a.teamId===id).forEach(a=> imgSet('foto_'+a.id, null));
@@ -7657,6 +7701,7 @@ function renderEdital(){
   if(editalSubTab==='desfile'){
     document.getElementById('main').innerHTML = subnav + renderDesfileContentHtml();
     bindEditalSubNav();
+    bindDesfileEvents();
     renderDesfileBody();
     return;
   }
@@ -8164,37 +8209,135 @@ function renderIndivTable(){
 }
 
 /* ----- Desfile de Abertura ----- */
-function renderDesfileContentHtml(){
-  return `<div class="card"><h2>Desfile de Abertura</h2>
-    <p class="hint">Até 30 pontos por participação (10/20/30 conforme % de estudantes desfilando), mais até 10 pontos em cada um dos critérios de organização, performance e postura na arquibancada.</p></div>
-  <div class="card"><table><thead><tr><th>equipe</th><th>Participação (0/10/20/30)</th><th>Organização (0–10)</th><th>Performance (0–10)</th><th>Postura (0–10)</th><th>Total</th></tr></thead><tbody id="desfileBody"></tbody></table></div>`;
+let desfileJuradoSelecionado = null; // qual jurado está lançando votos agora (seleção de tela, não faz parte de STATE)
+
+function nextDesfileJuradoId(){
+  return (STATE.desfileJurados.reduce((m,j)=>Math.max(m,j.id),0)) + 1;
 }
-function renderDesfileBody(){
-  const body = document.getElementById('desfileBody');
+function renderDesfileContentHtml(){
+  const total = STATE.desfileJurados.length;
+  return `<div class="card"><h2>Desfile de Abertura</h2>
+    <p class="hint">Até 30 pontos por participação (10/20/30 conforme % de estudantes desfilando), mais até 10 pontos em cada um dos critérios de organização, performance e postura na arquibancada. Vários jurados podem avaliar — o total de cada Equipe usado na Classificação Geral é a <strong>média</strong> dos votos lançados para ela.</p>
+  </div>
+
+  ${isAdmin ? `<div class="card">
+    <h2 style="font-size:15px;">Jurados</h2>
+    <p class="hint">Cadastre quem vai avaliar o desfile. Cada jurado lança seus próprios votos, separadamente.</p>
+    ${total ? `<div class="pill-group" style="margin-bottom:10px;">
+      ${STATE.desfileJurados.map(j=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(j.nome)}<button class="danger removeDesfileJurado" data-jurado="${j.id}" title="Remover este jurado" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
+    </div>` : ''}
+    <div class="row">
+      <div class="field"><label class="f-label">Nome do jurado</label><input type="text" id="desfileNovoJuradoNome" placeholder="Ex.: Professora Ana" style="width:220px;"></div>
+      <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="desfileAddJurado">+ Adicionar jurado</button></div>
+    </div>
+  </div>` : ''}
+
+  <div class="card">
+    <h2 style="font-size:15px;">Lançar votos</h2>
+    ${total===0 ? `<p class="hint">${isAdmin?'Cadastre pelo menos um jurado acima antes de lançar votos.':'Nenhum jurado cadastrado ainda.'}</p>` : `
+    <div class="field" style="margin-bottom:10px; max-width:280px;">
+      <label class="f-label">Sou o(a) jurado(a):</label>
+      <select id="desfileSelecaoJurado">
+        <option value="">— Escolha —</option>
+        ${STATE.desfileJurados.map(j=>`<option value="${j.id}" ${desfileJuradoSelecionado===j.id?'selected':''}>${escPdf(j.nome)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="desfileVotosWrap"></div>`}
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:15px;">Resultado (média dos jurados)</h2>
+    <p class="hint">Esses são os totais usados na Classificação Geral — somente leitura, calculados automaticamente a partir dos votos acima.</p>
+    <table><thead><tr><th>equipe</th><th>Participação</th><th>Organização</th><th>Performance</th><th>Postura</th><th>Total</th><th>Jurados</th></tr></thead><tbody id="desfileBody"></tbody></table>
+  </div>`;
+}
+function renderDesfileVotosWrap(){
+  const wrap = document.getElementById('desfileVotosWrap');
+  if(!wrap) return;
+  if(!desfileJuradoSelecionado){ wrap.innerHTML = `<p class="hint">Escolha seu nome acima para lançar (ou revisar) seus votos.</p>`; return; }
+  const jurado = STATE.desfileJurados.find(j=>j.id===desfileJuradoSelecionado);
+  if(!jurado){ desfileJuradoSelecionado = null; wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<table><thead><tr><th>equipe</th><th>Participação (0/10/20/30)</th><th>Organização (0–10)</th><th>Performance (0–10)</th><th>Postura (0–10)</th><th>Meu total</th></tr></thead><tbody id="desfileVotosBody"></tbody></table>`;
+  const body = document.getElementById('desfileVotosBody');
   body.innerHTML = STATE.teams.map(t=>{
-    const d = STATE.desfile[t.id] || {participacao:0, organizacao:0, performance:0, postura:0};
-    const total = (d.participacao||0)+(d.organizacao||0)+(d.performance||0)+(d.postura||0);
+    const chave = t.id+'|'+jurado.id;
+    const v = STATE.desfileVotos[chave] || {participacao:0, organizacao:0, performance:0, postura:0};
+    const total = (v.participacao||0)+(v.organizacao||0)+(v.performance||0)+(v.postura||0);
     return `<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
-      <td><select class="participacao" ${adminDisabled()}>${[0,10,20,30].map(v=>`<option value="${v}" ${d.participacao===v?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td><input type="number" class="organizacao" min="0" max="10" value="${d.organizacao||0}" ${adminDisabled()}></td>
-      <td><input type="number" class="performance" min="0" max="10" value="${d.performance||0}" ${adminDisabled()}></td>
-      <td><input type="number" class="postura" min="0" max="10" value="${d.postura||0}" ${adminDisabled()}></td>
+      <td><select class="vParticipacao" ${adminDisabled()}>${[0,10,20,30].map(n=>`<option value="${n}" ${v.participacao===n?'selected':''}>${n}</option>`).join('')}</select></td>
+      <td><input type="number" class="vOrganizacao" min="0" max="10" value="${v.organizacao||0}" ${adminDisabled()}></td>
+      <td><input type="number" class="vPerformance" min="0" max="10" value="${v.performance||0}" ${adminDisabled()}></td>
+      <td><input type="number" class="vPostura" min="0" max="10" value="${v.postura||0}" ${adminDisabled()}></td>
       <td class="mono totalCell">${total}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr').forEach(tr=>{
     const teamId = tr.dataset.team;
-    if(!STATE.desfile[teamId]) STATE.desfile[teamId] = {participacao:0, organizacao:0, performance:0, postura:0};
-    const d = STATE.desfile[teamId];
+    const chave = teamId+'|'+jurado.id;
     const update = ()=>{
-      d.participacao = Number(tr.querySelector('.participacao').value)||0;
-      d.organizacao = Math.max(0,Math.min(10,Number(tr.querySelector('.organizacao').value)||0));
-      d.performance = Math.max(0,Math.min(10,Number(tr.querySelector('.performance').value)||0));
-      d.postura = Math.max(0,Math.min(10,Number(tr.querySelector('.postura').value)||0));
-      tr.querySelector('.totalCell').textContent = d.participacao+d.organizacao+d.performance+d.postura;
-      markDirty(); renderScoreboard();
+      const v = {
+        participacao: Number(tr.querySelector('.vParticipacao').value)||0,
+        organizacao: Math.max(0,Math.min(10,Number(tr.querySelector('.vOrganizacao').value)||0)),
+        performance: Math.max(0,Math.min(10,Number(tr.querySelector('.vPerformance').value)||0)),
+        postura: Math.max(0,Math.min(10,Number(tr.querySelector('.vPostura').value)||0)),
+      };
+      STATE.desfileVotos[chave] = v;
+      tr.querySelector('.totalCell').textContent = v.participacao+v.organizacao+v.performance+v.postura;
+      recomputarDesfileMedia(teamId);
+      markDirty(); renderScoreboard(); renderDesfileBody();
     };
     tr.querySelectorAll('select, input').forEach(inp=>{ inp.addEventListener('change', update); inp.addEventListener('input', update); });
   });
+}
+function bindDesfileEvents(){
+  renderDesfileVotosWrap();
+  const addBtn = document.getElementById('desfileAddJurado');
+  if(addBtn) addBtn.addEventListener('click', ()=>{
+    const nomeEl = document.getElementById('desfileNovoJuradoNome');
+    const nome = nomeEl.value.trim();
+    if(!nome){ showAlert('Informe o nome do jurado.'); return; }
+    if(STATE.desfileJurados.some(j=> normalizeSearchText(j.nome)===normalizeSearchText(nome))){ showAlert('Já existe um jurado com esse nome.'); return; }
+    STATE.desfileJurados.push({id: nextDesfileJuradoId(), nome});
+    nomeEl.value = '';
+    markDirty(); renderEdital();
+  });
+  document.querySelectorAll('.removeDesfileJurado').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const juradoId = Number(btn.dataset.jurado);
+      const jurado = STATE.desfileJurados.find(j=>j.id===juradoId);
+      if(!jurado) return;
+      const votosDesseJurado = STATE.teams.filter(t=> STATE.desfileVotos[t.id+'|'+juradoId]!=null).length;
+      showConfirm(`Remover o jurado "${jurado.nome}"?${votosDesseJurado?` Os ${votosDesseJurado} voto(s) já lançados por ele serão apagados, e as médias recalculadas.`:''}`, ()=>{
+        STATE.teams.forEach(t=>{
+          const chave = t.id+'|'+juradoId;
+          if(STATE.desfileVotos[chave]!=null){ delete STATE.desfileVotos[chave]; recomputarDesfileMedia(t.id); }
+        });
+        STATE.desfileJurados = STATE.desfileJurados.filter(j=>j.id!==juradoId);
+        if(desfileJuradoSelecionado===juradoId) desfileJuradoSelecionado = null;
+        markDirty(); renderScoreboard(); renderEdital();
+      });
+    });
+  });
+  const selJurado = document.getElementById('desfileSelecaoJurado');
+  if(selJurado) selJurado.addEventListener('change', ()=>{
+    desfileJuradoSelecionado = selJurado.value ? Number(selJurado.value) : null;
+    renderDesfileVotosWrap();
+  });
+}
+function renderDesfileBody(){
+  const body = document.getElementById('desfileBody');
+  if(!body) return;
+  body.innerHTML = STATE.teams.map(t=>{
+    const d = STATE.desfile[t.id] || {participacao:0, organizacao:0, performance:0, postura:0};
+    const total = (d.participacao||0)+(d.organizacao||0)+(d.performance||0)+(d.postura||0);
+    const votaram = STATE.desfileJurados.filter(j=> STATE.desfileVotos[t.id+'|'+j.id]!=null).length;
+    return `<tr><td>${teamChip(t.id, null)}</td>
+      <td class="mono">${d.participacao||0}</td>
+      <td class="mono">${d.organizacao||0}</td>
+      <td class="mono">${d.performance||0}</td>
+      <td class="mono">${d.postura||0}</td>
+      <td class="mono" style="font-weight:700;">${total}</td>
+      <td class="hint" style="margin:0;">${votaram} de ${STATE.desfileJurados.length}</td></tr>`;
+  }).join('');
 }
 
 /* ----- Ajustes e Penalidades ----- */
