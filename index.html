@@ -6012,17 +6012,26 @@ function preencherInscritoDatalist(datalistId, inscritosOrdenados){
   dl.innerHTML = inscritosOrdenados.map(a=>`<option value="${escPdf(inscritoOptionLabel(a))}">`).join('');
 }
 /* Liga o campo de texto (busca) ao campo escondido (ID numérico): a cada alteração do
-   texto, tenta casar exatamente com o rótulo de algum inscrito da lista atual — o que
-   acontece automaticamente ao clicar numa sugestão do datalist, ou ao digitar o rótulo
-   inteiro. Se não casar com nada (texto ainda incompleto, ou nome inexistente), o campo
-   escondido fica vazio, e a validação de "selecione o(a) inscrito(a)" já existente
+   texto, tenta primeiro casar exatamente com o rótulo de algum inscrito da lista atual —
+   o que acontece automaticamente ao clicar numa sugestão do datalist. Se não bateu (por
+   exemplo, a pessoa digitou só o código ou o nome, sem clicar na sugestão — comum ao
+   digitar rápido ou colar um código já sabido de cor), tenta de novo com a mesma lógica
+   robusta já usada na Alimentação (findInscritoPorCodigoOuNome — código exato, nome
+   exato, ou nome parcial sem ambiguidade), assim buscar por nome, código ou escanear o QR
+   Code sempre funciona da mesma forma em qualquer formulário que localize um(a)
+   inscrito(a). Se ainda assim não achar nada (texto incompleto, ambíguo, ou inexistente),
+   o campo escondido fica vazio, e a validação de "selecione o(a) inscrito(a)" já existente
    continua barrando o cadastro normalmente. */
 function bindInscritoBuscavel(inputId, hiddenId, getInscritosOrdenados){
   const input = document.getElementById(inputId);
   const hidden = document.getElementById(hiddenId);
   if(!input || !hidden) return;
   input.addEventListener('input', ()=>{
-    const encontrado = getInscritosOrdenados().find(a=> inscritoOptionLabel(a)===input.value);
+    let encontrado = getInscritosOrdenados().find(a=> inscritoOptionLabel(a)===input.value);
+    if(!encontrado){
+      const resultado = findInscritoPorCodigoOuNome(input.value);
+      if(resultado.status==='found') encontrado = resultado.inscrito;
+    }
     hidden.value = encontrado ? encontrado.id : '';
   });
 }
@@ -6059,7 +6068,7 @@ function bindModalidadesArtisticasEvents(){
     const linguagem = document.getElementById('artLinguagemSel').value;
     const linguagemOutra = document.getElementById('artLinguagemOutra').value.trim();
     const sinopse = document.getElementById('artSinopse').value.trim();
-    if(!inscritoId){ showAlert('Selecione o(a) inscrito(a) — digite o nome ou código e escolha uma das sugestões.'); return; }
+    if(!inscritoId){ showAlert('Não encontrei esse(a) inscrito(a) — confira o nome ou código digitado, escolha uma das sugestões, ou use o botão de escanear o QR Code.'); return; }
     if(linguagem==='Outra' && !linguagemOutra){ showAlert('Descreva qual é a linguagem artística.'); return; }
     if(!sinopse){ showAlert('Escreva a sinopse — fale sobre o que pretende apresentar.'); return; }
     STATE.modalidadesArtisticas.push({ id: nextArtisticaId(), inscritoId, linguagem, linguagemOutra: linguagem==='Outra'?linguagemOutra:'', sinopse });
@@ -6099,7 +6108,7 @@ function saveEditArtisticaModal(){
   const linguagem = document.getElementById('editArtLinguagemSel').value;
   const linguagemOutra = document.getElementById('editArtLinguagemOutra').value.trim();
   const sinopse = document.getElementById('editArtSinopse').value.trim();
-  if(!inscritoId){ showAlert('Selecione o(a) inscrito(a) — digite o nome ou código e escolha uma das sugestões.'); return; }
+  if(!inscritoId){ showAlert('Não encontrei esse(a) inscrito(a) — confira o nome ou código digitado, escolha uma das sugestões, ou use o botão de escanear o QR Code.'); return; }
   if(linguagem==='Outra' && !linguagemOutra){ showAlert('Descreva qual é a linguagem artística.'); return; }
   if(!sinopse){ showAlert('Escreva a sinopse — fale sobre o que pretende apresentar.'); return; }
   m.inscritoId = inscritoId;
