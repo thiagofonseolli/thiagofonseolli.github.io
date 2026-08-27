@@ -5766,12 +5766,23 @@ function bindInscritosEvents(){
 
 function filteredInscritos(){
   const texto = normalizeSearchText(inscritoFiltroTexto.trim());
-  return STATE.inscritos.filter(a=>{
+  const list = STATE.inscritos.filter(a=>{
     if(inscritoFiltroequipe!=='todas' && a.teamId!==inscritoFiltroequipe) return false;
     if(inscritoFiltroModalidade!=='todas' && !(a.modalidades||[]).includes(inscritoFiltroModalidade)) return false;
     if(inscritoFiltroGenero!=='todos' && a.genero!==inscritoFiltroGenero) return false;
     if(texto && !normalizeSearchText(a.nome).includes(texto) && !normalizeSearchText(a.codigo||'').includes(texto)) return false;
     return true;
+  });
+  // Agrupa por Equipe (na ordem cadastrada em "Equipes") e depois por nome — sem isso, a
+  // lista só seguia a ordem de cadastro/importação: um inscrito adicionado manualmente
+  // DEPOIS de uma importação em lote (que normalmente já vem agrupada por equipe na
+  // planilha) acabava sempre no fim da lista, longe de quem é da mesma equipe, mesmo com
+  // a equipe/cor/dados corretos.
+  const ordemEquipes = STATE.teams.map(t=>t.id);
+  return list.slice().sort((a,b)=>{
+    const idxA = ordemEquipes.indexOf(a.teamId), idxB = ordemEquipes.indexOf(b.teamId);
+    if(idxA!==idxB) return idxA-idxB;
+    return (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
   });
 }
 
