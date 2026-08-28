@@ -5649,6 +5649,7 @@ function renderInscritosContentHtml(){
     <h2>Lista de Inscritos</h2>
     <div class="row" style="margin-bottom:10px;">
       <div class="field" style="flex:1; min-width:180px;"><label class="f-label">Buscar por nome ou código</label><input type="text" id="alBuscaTexto" placeholder="Ex.: Maria ou a3b7c1d9" value="${escPdf(inscritoFiltroTexto)}"></div>
+      ${isAdmin ? `<div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="alBuscaScanBtn" title="Escanear o QR Code do crachá para localizar na lista">📷 Escanear</button></div>` : ''}
       <div class="field"><label class="f-label">Filtrar por equipe</label><select id="alFiltroequipe">
         <option value="todas">Todas as Equipes</option>
         ${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}" ${inscritoFiltroequipe===t.id?'selected':''}>${escPdf(t.label)}</option>`).join('')}
@@ -5680,6 +5681,26 @@ function bindInscritosEvents(){
 
   document.getElementById('alFiltroGenero').addEventListener('change', (e)=>{ inscritoFiltroGenero=e.target.value; renderInscritosBody(); });
   document.getElementById('alBuscaTexto').addEventListener('input', (e)=>{ inscritoFiltroTexto=e.target.value; renderInscritosBody(); });
+  const alBuscaScanBtn = document.getElementById('alBuscaScanBtn');
+  if(alBuscaScanBtn) alBuscaScanBtn.addEventListener('click', ()=>{
+    openQrScanModal(texto=>{
+      // Mesma lógica robusta usada em qualquer outro ponto do app que localize um(a)
+      // inscrito(a) — código exato, nome exato, ou nome parcial sem ambiguidade.
+      const result = findInscritoPorCodigoOuNome(texto);
+      if(result.status==='empty'){ showAlert('Digite ou escaneie o nome ou o código do inscrito.'); return false; }
+      if(result.status==='notfound'){ showAlert('Inscrito não encontrado. Confira o nome ou o código.'); return false; }
+      if(result.status==='ambiguous'){
+        showAlert('Mais de um inscrito encontrado com esse nome. Use o código do inscrito para identificar com precisão:\n\n' +
+          result.matches.map(a=>`${a.nome} — ${teamLabel(a.teamId)} — código: ${a.codigo}`).join('\n'));
+        return false;
+      }
+      // Filtra a lista pelo código exato dessa pessoa (evita qualquer ambiguidade de nome)
+      inscritoFiltroTexto = result.inscrito.codigo || result.inscrito.nome;
+      document.getElementById('alBuscaTexto').value = inscritoFiltroTexto;
+      renderInscritosBody();
+      return true;
+    });
+  });
   document.getElementById('alFiltroequipe').addEventListener('change', (e)=>{ inscritoFiltroequipe=e.target.value; renderInscritosBody(); });
   document.getElementById('alFiltroMod').addEventListener('change', (e)=>{ inscritoFiltroModalidade=e.target.value; renderInscritosBody(); });
   document.getElementById('alExport').addEventListener('click', exportInscritosCSV);
