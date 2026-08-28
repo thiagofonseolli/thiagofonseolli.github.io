@@ -3364,12 +3364,7 @@ function renderTabOrderList(){
 
 /* ===================== PAINEL ===================== */
 function renderPainel(){
-  let html = `<div class="card">
-    <h2>📤 Publicar resultados</h2>
-    <p class="hint">Gera uma página somente-leitura (classificação + jogos) para compartilhar com pais e alunos. Salve o arquivo numa pasta do Google Drive ou OneDrive já compartilhada, e envie o link de visualização — sempre que quiser atualizar, clique aqui de novo e substitua o arquivo na mesma pasta.</p>
-    <button class="btn" id="btnPublicarResultados" ${adminDisabled()}>📤 Publicar resultados agora</button>
-  </div>
-  ` + classificacaoHtml() + `
+  let html = classificacaoHtml() + `
   <div class="card"><h2>Critérios de Desempate</h2>
     <p class="hint">O painel já ordena por total, saldo e pontos/gols marcados. Persistindo o empate, aplique manualmente, na ordem do regulamento:</p>
     <ol style="font-size:13.5px; line-height:1.6;">
@@ -3402,8 +3397,6 @@ function renderPainel(){
     </div>` : ''}
   </div>`;
   document.getElementById('main').innerHTML = html;
-  const btnPub = document.getElementById('btnPublicarResultados');
-  if(btnPub) btnPub.addEventListener('click', gerarPaginaPublicaResultados);
   document.querySelectorAll('.classificacaoRow').forEach(row=>{
     row.addEventListener('click', ()=>{
       const teamId = row.dataset.teamid;
@@ -8026,98 +8019,6 @@ function gerarEditalPdf(){
   win.document.close();
   win.focus();
   setTimeout(()=>{ win.print(); }, 300);
-}
-
-/* Gera uma página HTML autônoma e somente-leitura com a classificação e os jogos atuais —
-   sem login, sem dependências do restante do app. Pensada para ser salva
-   numa pasta compartilhada (Google Drive/OneDrive) e reaberta por pais/alunos pelo celular
-   a partir de um link de visualização. Cada clique gera uma nova "foto" dos dados; para
-   atualizar o que o público vê, é preciso publicar de novo e substituir o arquivo salvo. */
-function gerarPaginaPublicaResultados(){
-  const agora = new Date();
-  const dataHora = agora.toLocaleDateString('pt-BR') + ' às ' + agora.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
-
-  const gamesOrdenados = [...STATE.games].sort((a,b)=>{
-    const da = (a.data||'9999-99-99') + 'T' + (a.hora||'99:99');
-    const db = (b.data||'9999-99-99') + 'T' + (b.hora||'99:99');
-    return da.localeCompare(db);
-  });
-
-  const jogosHtml = gamesOrdenados.map(g=>{
-    const done = g.wo || (g.scoreA!=null && g.scoreB!=null);
-    const placar = g.wo
-      ? `W.O. — ${escPdf(teamLabel(g.wo==='A'?g.teamB:g.teamA))} venceu`
-      : (done ? `${g.scoreA} × ${g.scoreB}` : 'a definir');
-    let dataFmt = '';
-    if(g.data){ const [y,m,d] = g.data.split('-'); dataFmt = `${d}/${m}`; }
-    const quando = [dataFmt, g.hora, g.local].filter(Boolean).join(' · ');
-    return `<div class="pub-game ${done?'pub-done':''}">
-      <div class="pub-game-mod">${escPdf(g.modalidade)} · ${g.genero==='F'?'Feminino':'Masculino'}${quando?` · ${escPdf(quando)}`:''}</div>
-      <div class="pub-game-teams">
-        <span>${escPdf(teamLabel(g.teamA))}</span>
-        <span class="pub-placar">${placar}</span>
-        <span>${escPdf(teamLabel(g.teamB))}</span>
-      </div>
-    </div>`;
-  }).join('');
-
-  const html = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escPdf(STATE.eventName)} — Resultados</title>
-<style>
-  :root{ --navy:#12213F; --gold:#B8892E; --bg:#F4F6F9; --border:#E2E6ED; }
-  *{box-sizing:border-box;}
-  body{font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:#1B2432; margin:0; padding:0 0 40px;}
-  .pub-header{background:var(--navy); color:#fff; padding:18px 16px; text-align:center;}
-  .pub-header img{height:44px; vertical-align:middle; margin:0 10px; background:#fff; border-radius:6px; padding:3px;}
-  .pub-header h1{font-size:18px; margin:8px 0 2px;}
-  .pub-header .pub-sub{font-size:12px; opacity:0.85;}
-  .pub-wrap{max-width:760px; margin:0 auto; padding:16px;}
-  .card{background:#fff; border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px;}
-  .card h2{margin-top:0; font-size:16px; color:var(--navy);}
-  .hint{color:#5B6B82; font-size:12.5px;}
-  table{width:100%; border-collapse:collapse; font-size:12.5px;}
-  th,td{padding:6px 8px; border-bottom:1px solid var(--border); text-align:left;}
-  th{background:var(--bg);}
-  .mono{font-family:'Courier New',monospace;}
-  .gold{background:#FFF6DC;} .silver{background:#F2F2F2;} .bronze{background:#FBEBDC;}
-  .team-chip{display:inline-block; padding:2px 8px; border-radius:5px; font-size:12px; font-weight:600;}
-  .pub-game{border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px;}
-  .pub-game-mod{font-size:11px; color:#5B6B82; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.03em;}
-  .pub-game-teams{display:flex; align-items:center; justify-content:space-between; gap:10px; font-weight:600; flex-wrap:wrap;}
-  .pub-placar{font-family:'Courier New',monospace; font-weight:700; color:var(--navy); white-space:nowrap;}
-  .pub-game:not(.pub-done) .pub-placar{color:#9AA5B1; font-weight:400;}
-  .pub-footer{text-align:center; font-size:11px; color:#9AA5B1; margin-top:20px; padding:0 16px;}
-</style>
-</head>
-<body>
-  <div class="pub-header">
-    <img src="${LOGO_MARISTA_B64}" alt="Marista">
-    <img src="${LOGO_NAC_B64}" alt="NAC">
-    <h1>${escPdf(STATE.eventName)}</h1>
-    <div class="pub-sub">Resultados publicados em ${dataHora}</div>
-  </div>
-  <div class="pub-wrap">
-    ${classificacaoHtml()}
-    <div class="card">
-      <h2>Jogos</h2>
-      ${jogosHtml || '<p class="hint">Nenhum jogo cadastrado ainda.</p>'}
-    </div>
-    <p class="pub-footer">Esta página é uma foto dos resultados no momento da publicação (${dataHora}) — não atualiza sozinha. Para ver dados mais recentes, peça para o administrador publicar de novo.</p>
-  </div>
-</body>
-</html>`;
-
-  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const nomeArq = 'resultados-' + String(STATE.eventName||'jim').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
-  a.href = url; a.download = nomeArq + '.html';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /* ----- Regras Rápidas — Consulta Rápida ----- */
