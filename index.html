@@ -7696,21 +7696,29 @@ function buildExtratoEquipeHtml(teamId){
 
 function classificacaoHtml(){
   const rows = computeStandings();
+  // Uma coluna PRA CADA critério personalizado, na ordem cadastrada, com o nome atual
+  // de cada um como cabeçalho — criar/remover/renomear um critério (ver
+  // renderCriteriosBody) muda a tabela automaticamente, já que ela é montada na hora a
+  // partir de STATE.criteriosPersonalizados a cada renderização, não mais uma coluna
+  // única somando tudo.
+  const criterios = STATE.criteriosPersonalizados||[];
+  const totalColunas = 9 + criterios.length; // #, equipe, Jogos, Saldo, JogoLimpo, Individuais, Desfile, Ajustes, [critérios...], Total
   let html = `<div class="card"><h2>Classificação Geral</h2>
     <p class="hint">Clique numa Equipe para ver de onde vieram os pontos dela.</p>
-    <table><thead><tr><th>#</th><th>equipe</th><th>Jogos</th><th>Saldo</th><th>Jogo Limpo</th><th>Individuais</th><th>Desfile</th><th>Ajustes</th><th>Critérios</th><th>Total</th></tr></thead><tbody>`;
+    <table><thead><tr><th>#</th><th>equipe</th><th>Jogos</th><th>Saldo</th><th>Jogo Limpo</th><th>Individuais</th><th>Desfile</th><th>Ajustes</th>${criterios.map(c=>`<th>${escPdf(c.nome)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
   rows.forEach((r,i)=>{
     const cls = i===0?'gold':i===1?'silver':i===2?'bronze':'';
     const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
     const expanded = expandedTeamId===r.team.id;
+    const colunasCriterios = criterios.map(c=>`<td class="mono">${Number(c.pontos[r.team.id])||0}</td>`).join('');
     html += `<tr class="${cls} classificacaoRow" data-teamid="${r.team.id}" style="cursor:pointer;"><td>${medal}</td><td>${teamChip(r.team.id, null)}</td><td class="mono">${r.pontosJogos}</td>
       <td class="mono">${r.saldo>0?'+':''}${r.saldo}</td><td class="mono">${r.fair}</td><td class="mono">${r.pontosIndividual}</td>
-      <td class="mono">${r.pontosDesfile}</td><td class="mono">${r.pontosAjustes}</td><td class="mono">${r.pontosCriterios}</td><td class="mono" style="font-weight:700;">${r.total} <span style="font-weight:400; color:var(--muted);">${expanded?'▾':'▸'}</span></td></tr>`;
+      <td class="mono">${r.pontosDesfile}</td><td class="mono">${r.pontosAjustes}</td>${colunasCriterios}<td class="mono" style="font-weight:700;">${r.total} <span style="font-weight:400; color:var(--muted);">${expanded?'▾':'▸'}</span></td></tr>`;
     if(expanded){
-      html += `<tr class="classificacaoExtrato"><td colspan="10" style="background:var(--bg); padding:14px 16px;">${buildExtratoEquipeHtml(r.team.id)}</td></tr>`;
+      html += `<tr class="classificacaoExtrato"><td colspan="${totalColunas}" style="background:var(--bg); padding:14px 16px;">${buildExtratoEquipeHtml(r.team.id)}</td></tr>`;
     }
   });
-  if(rows.length===0) html += `<tr><td colspan="10" class="hint">Nenhuma equipe cadastrada.</td></tr>`;
+  if(rows.length===0) html += `<tr><td colspan="${totalColunas}" class="hint">Nenhuma equipe cadastrada.</td></tr>`;
   html += `</tbody></table></div>`;
   return html;
 }
@@ -8518,7 +8526,7 @@ function renderCriteriosBody(){
   }
   wrap.innerHTML = STATE.criteriosPersonalizados.map(c=>`<div class="card" data-crit="${c.id}">
     <div class="row" style="justify-content:space-between; align-items:center;">
-      <h2 style="margin:0;">${escPdf(c.nome)}</h2>
+      ${isAdmin ? `<div class="field" style="flex:1; max-width:320px; margin:0;"><input type="text" class="critNomeEdit" value="${escPdf(c.nome)}" style="font-family:'Oswald',sans-serif; font-size:16px; font-weight:600; width:100%;"></div>` : `<h2 style="margin:0;">${escPdf(c.nome)}</h2>`}
       ${isAdmin ? `<button class="btn danger small critRemove">✕ Remover critério</button>` : ''}
     </div>
     <table style="margin-top:10px;"><thead><tr><th>equipe</th><th>Pontos</th></tr></thead><tbody>
@@ -8531,6 +8539,17 @@ function renderCriteriosBody(){
     const critId = Number(card.dataset.crit);
     const crit = STATE.criteriosPersonalizados.find(c=>c.id===critId);
     if(!crit) return;
+    const nomeInput = card.querySelector('.critNomeEdit');
+    if(nomeInput) nomeInput.addEventListener('change', ()=>{
+      // O nome do critério vira o cabeçalho da coluna dele na Classificação Geral (ver
+      // classificacaoHtml) — mudar aqui já atualiza lá automaticamente, já que a tabela
+      // é montada na hora a partir de STATE.criteriosPersonalizados a cada renderização.
+      const novoNome = nomeInput.value.trim();
+      if(!novoNome){ showAlert('O nome do critério não pode ficar vazio.'); nomeInput.value = crit.nome; return; }
+      if(STATE.criteriosPersonalizados.some(c2=> c2.id!==critId && normalizeSearchText(c2.nome)===normalizeSearchText(novoNome))){ showAlert('Já existe outro critério com esse nome.'); nomeInput.value = crit.nome; return; }
+      crit.nome = novoNome;
+      markDirty(); renderScoreboard();
+    });
     const removeBtn = card.querySelector('.critRemove');
     if(removeBtn) removeBtn.addEventListener('click', ()=>{
       showConfirm(`Remover o critério "${crit.nome}"? Os pontos já atribuídos por ele serão descontados do total das Equipes.`, ()=>{
