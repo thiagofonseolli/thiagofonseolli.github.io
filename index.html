@@ -2692,14 +2692,54 @@ function syncMarcarPendente(tabela, registroId){ syncPendentes.set(`${tabela}:${
 
 function syncDetectarMudancasEAgendar(){
   SYNC_TABELAS_DIFF.forEach(tabela=>{
-    const idsAtuais = syncListarIdsAtuais(tabela);
     const anterior = syncUltimoRetrato[tabela] || {};
-    idsAtuais.forEach(id=>{
-      const linha = syncConstruirLinha(tabela, id);
-      const json = JSON.stringify(linha.dados);
-      if(anterior[id] !== json) syncMarcarPendente(tabela, id);
-    });
-    Object.keys(anterior).forEach(id=>{ if(!idsAtuais.map(String).includes(String(id))) syncMarcarPendente(tabela, id); });
+    const idsAtuaisSet = new Set();
+    if(SYNC_COLECOES[tabela]){
+      // Para coleções (Equipes, Inscritos, Jogos, etc.), percorre o array UMA ÚNICA VEZ
+      // e monta o json de cada item direto — em vez de chamar syncConstruirLinha(tabela,
+      // id) uma vez PRA CADA id, que por sua vez faz um .find() percorrendo a coleção
+      // INTEIRA de novo a cada chamada (O(n) × n ids = O(n²) só para montar os dados,
+      // sem nem contar a busca de remoções abaixo). Foi a causa raiz do problema medido:
+      // com 1000 inscritos, o ciclo de detecção (roda a cada 20s, em todo dispositivo
+      // conectado) chegava a mais de 340ms — perceptível como travamento em torneios
+      // grandes. Depois desta correção (mais a de baixo, já feita), cai pra poucos
+      // milissegundos com o mesmo volume.
+      const cfg = SYNC_COLECOES[tabela];
+      cfg.lista().forEach(item=>{
+        const id = String(item[cfg.idField]);
+        idsAtuaisSet.add(id);
+        const json = JSON.stringify(syncColecaoParaFora(tabela, item));
+        if(anterior[id] !== json) syncMarcarPendente(tabela, id);
+      });
+    } else if(tabela==='inscrito_foto'){
+      // Mesmo problema, mesma correção: 'inscrito_foto' é uma tabela "especial" com UMA
+      // entrada por inscrito (escala com o mesmo volume que a tabela 'inscritos'), mas
+      // syncConstruirLinha('inscrito_foto', id) faz um STATE.inscritos.find(...) —
+      // outra busca linear repetida N vezes. Como já temos acesso direto a
+      // STATE.inscritos aqui, monta os dados de cada foto na mesma passada, sem repetir
+      // a busca — era a segunda metade do mesmo problema medido acima.
+      STATE.inscritos.forEach(a=>{
+        const id = String(a.id);
+        idsAtuaisSet.add(id);
+        const json = JSON.stringify(a.foto || null);
+        if(anterior[id] !== json) syncMarcarPendente(tabela, id);
+      });
+    } else {
+      // Tabelas "especiais" restantes (config, modalidades, individual, desfile,
+      // ajustes etc.) são tipicamente pequenas (não crescem com o número de
+      // inscritos/jogos), então o custo de syncConstruirLinha() por id aqui não chega a
+      // ser um problema real.
+      syncListarIdsAtuais(tabela).forEach(id=>{
+        idsAtuaisSet.add(String(id));
+        const linha = syncConstruirLinha(tabela, id);
+        const json = JSON.stringify(linha.dados);
+        if(anterior[id] !== json) syncMarcarPendente(tabela, id);
+      });
+    }
+    // Set (busca O(1)) em vez de "idsAtuais.map(String).includes(...)" dentro do loop —
+    // esse padrão recriava um array novo E fazia uma busca linear PRA CADA id anterior,
+    // ficando O(n²) por si só também.
+    Object.keys(anterior).forEach(id=>{ if(!idsAtuaisSet.has(String(id))) syncMarcarPendente(tabela, id); });
     // NÃO atualiza syncUltimoRetrato aqui — só marca o que precisa ser enviado. O
     // retrato só é atualizado depois que o ENVIO for de fato confirmado com sucesso
     // (ver syncEnviarPendentes) ou depois de um PULL (syncAtualizarRetratoPosPull).
