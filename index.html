@@ -8653,11 +8653,15 @@ function importBackup(file){
 function renderAll(){
   renderHeaderBlock();
   // Modo de acesso restrito (código de Equipe, sem senha de admin): mostra só a tela de
-  // cadastro de inscritos da própria Equipe, escondendo abas e botões de administrador
-  // por completo — ver renderAcessoEquipeView().
+  // cadastro de inscritos da própria Equipe, escondendo abas e os botões EXCLUSIVOS de
+  // administrador — o status de salvamento e o botão "Salvar" continuam visíveis e
+  // funcionando (ver correção: sem isso, quem usa esse acesso não tinha NENHUMA
+  // confirmação visual de que o cadastro estava sendo salvo de verdade).
   if(accessoEquipeId){ renderAcessoEquipeView(); updateSaveStatus(); return; }
-  const toolbarEl = document.querySelector('.toolbar');
-  if(toolbarEl) toolbarEl.style.display = ''; // desfaz o "esconder" do modo de acesso restrito, se vinha de lá
+  const btnAdminEl = document.getElementById('btnAdmin');
+  if(btnAdminEl) btnAdminEl.style.display = ''; // desfaz o "esconder" do modo de acesso restrito, se vinha de lá
+  const moreOptionsEl = document.getElementById('moreOptionsWrap');
+  if(moreOptionsEl) moreOptionsEl.style.display = '';
   if(!isAdmin && activeTab!=='painel' && activeTab!=='edital') activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
   renderTabs();
   renderScoreboard();
@@ -8672,18 +8676,23 @@ function renderAll(){
   updateSaveStatus();
 }
 /* ===================== ACESSO RESTRITO DE EQUIPE (código, sem senha de admin) =====================
-   Tela dedicada, sem abas nem botões de administrador — só o cadastro de inscritos da
-   Equipe cujo código foi usado pra entrar (ver attemptLoginCodigoEquipe). Reaproveita as
-   mesmas validações do cadastro manual de admin (nome obrigatório, restrição/alergia
-   descritas quando marcadas, aviso de nome duplicado) — só que sem seletor de Equipe
-   (sempre a mesma) e sem os campos que não fazem sentido aqui (foto, cor, etc.). */
+   Tela dedicada, sem abas nem os botões EXCLUSIVOS de administrador (Login, Mais
+   opções) — só o cadastro de inscritos da Equipe cujo código foi usado pra entrar (ver
+   attemptLoginCodigoEquipe). O status de salvamento (#saveStatus) e o botão "Salvar"
+   continuam visíveis, dando a mesma confirmação que o admin já tem de que os dados
+   estão realmente sendo gravados. Reaproveita as mesmas validações do cadastro manual
+   de admin (nome obrigatório, restrição/alergia descritas quando marcadas, aviso de
+   nome duplicado) — só que sem seletor de Equipe (sempre a mesma) e sem os campos que
+   não fazem sentido aqui (cor, etc.). */
 function renderAcessoEquipeView(){
   const team = STATE.teams.find(t=>t.id===accessoEquipeId);
   if(!team){ doLogoutAcessoEquipe(); return; } // a Equipe foi removida nesse meio-tempo — não há mais pra onde voltar
   const tabsEl = document.getElementById('tabs');
   if(tabsEl) tabsEl.innerHTML = '';
-  const toolbarEl = document.querySelector('.toolbar');
-  if(toolbarEl) toolbarEl.style.display = 'none';
+  const btnAdminEl = document.getElementById('btnAdmin');
+  if(btnAdminEl) btnAdminEl.style.display = 'none';
+  const moreOptionsEl = document.getElementById('moreOptionsWrap');
+  if(moreOptionsEl) moreOptionsEl.style.display = 'none';
   const oldBanner = document.getElementById('viewOnlyBanner');
   if(oldBanner) oldBanner.remove();
   const banner = document.createElement('div');
@@ -8913,7 +8922,7 @@ function mostrarErroCarregamentoInicial(){
   restoreAdminSession();
   restoreAcessoEquipeSession();
   document.title = STATE.eventName + ' — Painel de Gestão';
-  document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin) saveState(); });
+  document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin || accessoEquipeId) saveState(); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
   document.getElementById('btnImport').addEventListener('click', ()=>{ if(isAdmin) document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files[0] && isAdmin) importBackup(e.target.files[0]); e.target.value=''; });
