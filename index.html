@@ -265,7 +265,7 @@
     <div id="loginModalEquipeMode" style="display:none;">
       <h2 style="color:var(--navy); margin-top:0;">Acesso da Equipe</h2>
       <p class="hint">Digite o código de acesso repassado pelo administrador para cadastrar os inscritos da sua Equipe.</p>
-      <div class="field"><label class="f-label">Código de acesso</label><input type="text" id="loginCodigoEquipe" style="width:100%; text-transform:uppercase;" maxlength="6"></div>
+      <div class="field"><label class="f-label">Código de acesso</label><input type="text" id="loginCodigoEquipe" style="width:100%; text-transform:uppercase;" maxlength="10"></div>
       <p id="loginCodigoEquipeError" style="color:var(--crimson); font-size:12.5px; display:none;">Código não encontrado. Confira com o administrador.</p>
       <div class="modal-actions">
         <button class="btn secondary" id="cancelLoginCodigoBtn">Cancelar</button>
@@ -2141,11 +2141,20 @@ function uniqueStudentCode(){
    administrador. Bastava abrir o DevTools do navegador pra ver o código de qualquer
    Equipe. Com hash, o texto puro só existe no exato momento em que é gerado (mostrado
    uma única vez pro administrador) — nunca mais é recuperável depois disso, nem por
-   quem administra o torneio; só dá pra gerar um código NOVO. */
+   quem administra o torneio; só dá pra gerar um código NOVO.
+   10 caracteres (não 6) — achado numa auditoria seguinte: como o hash+salt continuam
+   sendo sincronizados abertamente (a mesma exposição pública de antes, agora só
+   protegida por hash em vez de texto puro), e o hash usado (SHA-256 de rodada única,
+   sem PBKDF2/bcrypt) é rápido de calcular em massa, um código de 6 caracteres (~1
+   bilhão de combinações) podia ser quebrado por força bruta OFFLINE (sem nunca
+   interagir com o app ao vivo) em menos de 1 segundo numa GPU comum. Com 10 caracteres,
+   o espaço de busca sobe pra ~1,15 quatrilhão de combinações — mais de 1 milhão de
+   vezes maior — tornando a força bruta impraticável mesmo com hardware potente,
+   enquanto o código continua digitável/repassável por telefone sem grande dificuldade. */
 function gerarCodigoAcessoEquipe(){
   const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let codigo = '';
-  for(let i=0;i<6;i++) codigo += alfabeto[Math.floor(Math.random()*alfabeto.length)];
+  for(let i=0;i<10;i++) codigo += alfabeto[Math.floor(Math.random()*alfabeto.length)];
   return codigo;
 }
 /* Gera um novo código de acesso pra uma Equipe, grava só o salt+hash em STATE (nunca o
@@ -5041,7 +5050,14 @@ function renderCodigosAcessoBody(){
       const team = STATE.teams.find(t=>t.id===teamId);
       if(!team) return;
       const gerar = async ()=>{
-        const codigoPlano = await definirCodigoAcessoEquipe(team);
+        // Busca de novo, fresco, pelo ID — não usa a `team` capturada lá em cima antes
+        // do showConfirm() (para regenerar). Enquanto o diálogo esperava confirmação,
+        // uma sincronização concorrente pode ter substituído esse objeto no array —
+        // mesmo motivo das correções já feitas no painel de jogo, nos locais do
+        // Gerador de Tabela, e na edição de inscrito desta mesma funcionalidade.
+        const teamAtual = STATE.teams.find(t=>t.id===teamId);
+        if(!teamAtual){ showAlert('Essa Equipe não existe mais.'); return; }
+        const codigoPlano = await definirCodigoAcessoEquipe(teamAtual);
         renderCodigosAcessoBody();
         // A cópia automática só é tentada DEPOIS do cálculo do hash (definirCodigoAcessoEquipe
         // acima) — em alguns navegadores, copiar pra área de transferência exige acontecer
@@ -5055,7 +5071,7 @@ function renderCodigosAcessoBody(){
         if(navigator.clipboard && navigator.clipboard.writeText){
           try{ await navigator.clipboard.writeText(codigoPlano); copiadoOk = true; }catch(e){}
         }
-        showAlert(`Novo código de acesso para "${team.label}": ${codigoPlano}\n\n${copiadoOk?'Já copiado pra área de transferência.\n\n':''}Anote ou repasse agora — por segurança, esse código não fica salvo em texto puro em lugar nenhum, e não será possível vê-lo de novo depois de fechar este aviso (só gerar um código novo).`);
+        showAlert(`Novo código de acesso para "${teamAtual.label}": ${codigoPlano}\n\n${copiadoOk?'Já copiado pra área de transferência.\n\n':''}Anote ou repasse agora — por segurança, esse código não fica salvo em texto puro em lugar nenhum, e não será possível vê-lo de novo depois de fechar este aviso (só gerar um código novo).`);
       };
       if(team.codigoAcessoHash){
         showConfirm(`Gerar um novo código de acesso para "${team.label}"? O código atual para de funcionar imediatamente para quem tentar entrar com ele depois disso.`, gerar);
@@ -8914,10 +8930,19 @@ function renderAcessoEquipeView(){
       // está DE FATO no array nesse instante, nunca num órfão.
       const alvo = STATE.inscritos.find(a=>a.id===aeEditandoId && a.teamId===team.id);
       if(!alvo){ showAlert('Esse inscrito não existe mais nesta Equipe (pode ter sido removido). A edição foi cancelada.'); aeEditandoId=null; renderAcessoEquipeView(); return; }
+      const idAlvo = alvo.id;
       const salvarEdicao = ()=>{
-        alvo.nome = nome; alvo.genero = genero; alvo.modalidades = mods;
-        alvo.restricaoAlimentar = temRestricao; alvo.restricoesAlimentares = restricoesAlimentares;
-        alvo.alergiaMedicamento = temAlergia; alvo.alergias = alergiasMedicamento;
+        // Busca de novo MAIS UMA VEZ aqui dentro, pelo ID — não usa `alvo` capturado
+        // acima. Se o nome bater com outro já existente, isso passa por showConfirm()
+        // primeiro, que ESPERA o clique da pessoa — enquanto esse diálogo está aberto,
+        // uma sincronização concorrente ainda pode substituir o objeto no array
+        // (mesma variante do problema, só que na espera da confirmação, não antes
+        // dela — confirmado com teste).
+        const alvoAtual = STATE.inscritos.find(a=>a.id===idAlvo);
+        if(!alvoAtual){ showAlert('Esse inscrito não existe mais nesta Equipe (pode ter sido removido). A edição foi cancelada.'); aeEditandoId=null; renderAcessoEquipeView(); return; }
+        alvoAtual.nome = nome; alvoAtual.genero = genero; alvoAtual.modalidades = mods;
+        alvoAtual.restricaoAlimentar = temRestricao; alvoAtual.restricoesAlimentares = restricoesAlimentares;
+        alvoAtual.alergiaMedicamento = temAlergia; alvoAtual.alergias = alergiasMedicamento;
         aeEditandoId = null;
         markDirty();
         renderAcessoEquipeView();
