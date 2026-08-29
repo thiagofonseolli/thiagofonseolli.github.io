@@ -2150,9 +2150,24 @@ function gerarCodigoAcessoEquipe(){
 }
 /* Gera um novo código de acesso pra uma Equipe, grava só o salt+hash em STATE (nunca o
    texto puro), e devolve o texto puro pra quem chamou mostrar UMA VEZ pro administrador
-   (ver renderCodigosAcessoBody). */
+   (ver renderCodigosAcessoBody). Confere que o código sorteado não colide com o de
+   NENHUMA outra Equipe (hasheando o candidato contra o salt de cada uma e comparando) —
+   com hash não dá pra comparar direto como antes (texto puro), mas a checagem continua
+   valendo a pena mesmo sendo rarissima a colisão (~1 em 1 bilhão por par de Equipes,
+   dado o alfabeto e tamanho do código): sem ela, duas Equipes poderiam acabar com o
+   mesmo código por pura coincidência, e a primeira encontrada em attemptLoginCodigoEquipe
+   sempre "ganharia", deixando a outra inacessível por esse código. */
 async function definirCodigoAcessoEquipe(team){
-  const codigoPlano = gerarCodigoAcessoEquipe();
+  let codigoPlano, colide;
+  do{
+    codigoPlano = gerarCodigoAcessoEquipe();
+    colide = false;
+    for(const outraEquipe of STATE.teams){
+      if(outraEquipe===team || !outraEquipe.codigoAcessoHash || !outraEquipe.codigoAcessoSalt) continue;
+      const hashCandidato = await hashSenhaAdmin(codigoPlano, outraEquipe.codigoAcessoSalt);
+      if(hashCandidato===outraEquipe.codigoAcessoHash){ colide = true; break; }
+    }
+  } while(colide);
   team.codigoAcessoSalt = gerarSaltSenha();
   team.codigoAcessoHash = await hashSenhaAdmin(codigoPlano, team.codigoAcessoSalt);
   delete team.codigoAcesso; // limpa qualquer resquício de um código antigo em texto puro (ver migrarCodigosAcessoLegados)
@@ -5028,6 +5043,14 @@ function renderCodigosAcessoBody(){
       const gerar = async ()=>{
         const codigoPlano = await definirCodigoAcessoEquipe(team);
         renderCodigosAcessoBody();
+        // A cópia automática só é tentada DEPOIS do cálculo do hash (definirCodigoAcessoEquipe
+        // acima) — em alguns navegadores, copiar pra área de transferência exige acontecer
+        // bem perto do gesto original do usuário (clique), e esse cálculo (rápido, mas
+        // assíncrono) pode empurrar a chamada pra fora dessa janela, fazendo a cópia
+        // falhar silenciosamente. Não é um problema de correção — o try/catch só marca
+        // copiadoOk como true se a cópia REALMENTE deu certo, nunca informando sucesso
+        // indevido — só significa que, nesses casos raros, o código mostrado no aviso
+        // abaixo precisa ser copiado manualmente em vez de já vir copiado.
         let copiadoOk = false;
         if(navigator.clipboard && navigator.clipboard.writeText){
           try{ await navigator.clipboard.writeText(codigoPlano); copiadoOk = true; }catch(e){}
@@ -8751,9 +8774,16 @@ function renderAcessoEquipeView(){
   const modOptions = inscritoModalidadeOptions();
   const inscritosDaEquipe = STATE.inscritos.filter(a=>a.teamId===team.id).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
   // Se o inscrito em edição não existe mais (foi removido em outro dispositivo nesse
-  // meio-tempo), volta pro modo "adicionar" em vez de mostrar um formulário órfão.
+  // meio-tempo), volta pro modo "adicionar" em vez de mostrar um formulário órfão. Essa
+  // variável `editando` só é usada aqui, pra MONTAR o formulário — o clique em "Salvar
+  // alterações" busca de novo, fresco, pelo aeEditandoId (ver handler do aeAdd mais
+  // abaixo), nunca mutando esta referência diretamente. Sem isso, uma sincronização
+  // concorrente enquanto o formulário está aberto (ex.: outro dispositivo editando essa
+  // mesma pessoa) faria a edição do representante se perder silenciosamente, escrevendo
+  // num objeto que não está mais no array de verdade — confirmado com teste.
   const editando = aeEditandoId ? STATE.inscritos.find(a=>a.id===aeEditandoId && a.teamId===team.id) : null;
   if(aeEditandoId && !editando) aeEditandoId = null;
+  const fotoEditandoUrl = editando ? imgGet(editando.foto) : null;
 
   document.getElementById('main').innerHTML = `
   <div class="card">
@@ -8765,7 +8795,7 @@ function renderAcessoEquipeView(){
         <label class="f-label">Foto</label>
         <div class="row" style="align-items:center; gap:8px;">
           <div id="alFotoPreviewWrap" style="width:46px; height:46px; border-radius:8px; overflow:hidden; background:var(--bg); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;">
-            <span class="hint" style="margin:0; text-align:center; padding:0 4px; font-size:10px;">Sem foto</span>
+            ${fotoEditandoUrl ? `<img src="${fotoEditandoUrl}" alt="Foto de ${escPdf(editando.nome)}" style="width:100%; height:100%; object-fit:cover;">` : `<span class="hint" style="margin:0; text-align:center; padding:0 4px; font-size:10px;">Sem foto</span>`}
           </div>
           <button class="btn secondary small" type="button" id="alAbrirFoto">📷 ${editando?'Trocar foto':'Adicionar foto'}</button>
         </div>
@@ -8818,7 +8848,14 @@ function renderAcessoEquipeView(){
   document.getElementById('aeTemRestricao').addEventListener('change', (e)=>{ document.getElementById('aeRestricaoWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
   document.getElementById('aeTemAlergia').addEventListener('change', (e)=>{ document.getElementById('aeAlergiaWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
   document.getElementById('alAbrirFoto').addEventListener('click', ()=> openFotoModal(editando ? editando.id : null));
-  updateAlNovaFotoPreview();
+  // Só aplica a "prévia pendente" (alNovoFotoDataUrl) no modo ADICIONAR — no modo EDITAR,
+  // a foto já foi montada acima a partir do que a pessoa já tem (fotoEditandoUrl), e uma
+  // troca de foto durante a edição salva direto (openFotoModal(editando.id) ->
+  // saveFotoModal() grava e re-renderiza sozinho). Chamar updateAlNovaFotoPreview() aqui
+  // incondicionalmente era a causa de uma foto escolhida pra um cadastro NOVO (ainda não
+  // salvo) vazar para dentro da edição de outra pessoa, se o representante trocasse de
+  // contexto no meio do caminho sem finalizar o cadastro — confirmado com teste.
+  if(!editando) updateAlNovaFotoPreview();
   document.querySelectorAll('.aeFotoThumbBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = Number(btn.closest('tr').dataset.id);
@@ -8826,11 +8863,12 @@ function renderAcessoEquipeView(){
     });
   });
   const cancelarBtn = document.getElementById('aeCancelarEdicao');
-  if(cancelarBtn) cancelarBtn.addEventListener('click', ()=>{ aeEditandoId = null; renderAcessoEquipeView(); });
+  if(cancelarBtn) cancelarBtn.addEventListener('click', ()=>{ aeEditandoId = null; alNovoFotoDataUrl = null; renderAcessoEquipeView(); });
 
   document.querySelectorAll('.aeEditar').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       aeEditandoId = Number(btn.closest('tr').dataset.id);
+      alNovoFotoDataUrl = null; // descarta qualquer foto ainda pendente de um cadastro novo abandonado no meio do caminho
       renderAcessoEquipeView();
     });
   });
@@ -8849,6 +8887,7 @@ function renderAcessoEquipeView(){
         return false;
       }
       aeEditandoId = result.inscrito.id;
+      alNovoFotoDataUrl = null; // mesmo motivo do clique em "Editar" acima
       renderAcessoEquipeView();
       return true;
     });
@@ -8866,17 +8905,24 @@ function renderAcessoEquipeView(){
     if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
     if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
 
-    if(editando){
+    if(aeEditandoId){
+      // Busca de novo, fresco, pelo ID — NÃO usa a `editando` capturada lá em cima na
+      // montagem do formulário. Enquanto o representante preenchia, uma sincronização
+      // concorrente pode ter substituído esse objeto no array (mesmo mecanismo já
+      // corrigido antes no painel de detalhes do jogo e nos locais do Gerador de
+      // Tabela) — buscar de novo aqui garante que a edição sempre vai pro objeto que
+      // está DE FATO no array nesse instante, nunca num órfão.
+      const alvo = STATE.inscritos.find(a=>a.id===aeEditandoId && a.teamId===team.id);
+      if(!alvo){ showAlert('Esse inscrito não existe mais nesta Equipe (pode ter sido removido). A edição foi cancelada.'); aeEditandoId=null; renderAcessoEquipeView(); return; }
       const salvarEdicao = ()=>{
-        editando.nome = nome; editando.genero = genero; editando.modalidades = mods;
-        editando.restricaoAlimentar = temRestricao; editando.restricoesAlimentares = restricoesAlimentares;
-        editando.alergiaMedicamento = temAlergia; editando.alergias = alergiasMedicamento;
-        if(alNovoFotoDataUrl){ editando.foto = imgSet('foto_'+editando.id, alNovoFotoDataUrl); alNovoFotoDataUrl = null; }
+        alvo.nome = nome; alvo.genero = genero; alvo.modalidades = mods;
+        alvo.restricaoAlimentar = temRestricao; alvo.restricoesAlimentares = restricoesAlimentares;
+        alvo.alergiaMedicamento = temAlergia; alvo.alergias = alergiasMedicamento;
         aeEditandoId = null;
         markDirty();
         renderAcessoEquipeView();
       };
-      const duplicado = STATE.inscritos.some(a=> a.id!==editando.id && a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+      const duplicado = STATE.inscritos.some(a=> a.id!==alvo.id && a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
       if(duplicado){
         showConfirm(`Já existe outro inscrito chamado "${nome}" em ${team.label}. Salvar mesmo assim?`, salvarEdicao);
       } else {
