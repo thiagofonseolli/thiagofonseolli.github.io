@@ -2102,7 +2102,20 @@ function ensureDefaults(s){
   return s;
 }
 
-function nextInscritoId(){ return (STATE.inscritos.reduce((m,a)=>Math.max(m,a.id),0)) + 1; }
+/* Soma um salto aleatório grande ao maior ID já visto localmente, em vez de sempre +1 —
+   com múltiplos representantes de Equipe podendo cadastrar ao mesmo tempo em
+   dispositivos diferentes (ver acesso restrito por código), dois dispositivos partindo
+   do MESMO estado (ainda sem sincronizar um com o outro) calculariam o MESMO "próximo"
+   ID com só +1, e um cadastro sobrescreveria o outro silenciosamente ao sincronizar
+   depois — confirmado com teste. Um salto aleatório grande faz dois cálculos
+   concorrentes quase certamente divergirem (a chance de colisão exata, mesmo com vários
+   dispositivos cadastrando ao mesmo segundo, é desprezível). O `id` continua sendo só
+   uma chave interna — quem é mostrado/impresso pro usuário é o `codigo` (ver
+   uniqueStudentCode), não o id. */
+function nextInscritoId(){
+  const maiorAtual = STATE.inscritos.reduce((m,a)=>Math.max(m,a.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
+}
 function generateStudentCode(){
   const letters = 'abcdefghijklmnopqrstuvwxyz';
   const digits = '0123456789';
@@ -2120,20 +2133,47 @@ function uniqueStudentCode(){
    responsável, capitão) para que ele mesmo cadastre os inscritos da própria Equipe, sem
    precisar da senha de administrador nem ter acesso a mais nada do painel (jogos,
    pontuações, outras Equipes, configurações). Alfabeto sem 0/O e 1/I/L -- caracteres
-   fáceis de confundir ao digitar ou ditar por telefone. Não é hash/criptografado (como a
-   senha de admin): o próprio administrador precisa poder VER e copiar o código pra
-   repassar à pessoa, então armazenar em texto puro é necessário aqui -- coerente com o
-   risco menor de um código vazado (só cadastra alunos numa única Equipe, nada mais).
-   Único, mas só entre Equipes -- não precisa ser globalmente único como o código do
-   inscrito, já que sempre é comparado junto com "existe uma Equipe com esse código". */
+   fáceis de confundir ao digitar ou ditar por telefone.
+   Guardado com HASH (salgado, igual à senha de admin — ver hashSenhaAdmin) — NUNCA em
+   texto puro. Achado numa auditoria: como o Painel/Edital são públicos (não exigem
+   login pra ler), QUALQUER visitante recebia, junto com os dados normais da Equipe, o
+   texto puro do código de acesso — mesmo sem nunca ter sido avisado dele por um
+   administrador. Bastava abrir o DevTools do navegador pra ver o código de qualquer
+   Equipe. Com hash, o texto puro só existe no exato momento em que é gerado (mostrado
+   uma única vez pro administrador) — nunca mais é recuperável depois disso, nem por
+   quem administra o torneio; só dá pra gerar um código NOVO. */
 function gerarCodigoAcessoEquipe(){
   const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let codigo;
-  do{
-    codigo = '';
-    for(let i=0;i<6;i++) codigo += alfabeto[Math.floor(Math.random()*alfabeto.length)];
-  } while(STATE.teams.some(t=>t.codigoAcesso===codigo));
+  let codigo = '';
+  for(let i=0;i<6;i++) codigo += alfabeto[Math.floor(Math.random()*alfabeto.length)];
   return codigo;
+}
+/* Gera um novo código de acesso pra uma Equipe, grava só o salt+hash em STATE (nunca o
+   texto puro), e devolve o texto puro pra quem chamou mostrar UMA VEZ pro administrador
+   (ver renderCodigosAcessoBody). */
+async function definirCodigoAcessoEquipe(team){
+  const codigoPlano = gerarCodigoAcessoEquipe();
+  team.codigoAcessoSalt = gerarSaltSenha();
+  team.codigoAcessoHash = await hashSenhaAdmin(codigoPlano, team.codigoAcessoSalt);
+  delete team.codigoAcesso; // limpa qualquer resquício de um código antigo em texto puro (ver migrarCodigosAcessoLegados)
+  markDirty();
+  return codigoPlano;
+}
+/* Migração única: converte qualquer código de acesso ainda guardado em texto puro (de
+   antes desta correção) para o formato com hash — sem isso, o texto puro continuaria
+   exposto pra qualquer visitante até alguém gerar um código novo manualmente. Chamada
+   uma vez, na inicialização (ver init()). */
+async function migrarCodigosAcessoLegados(){
+  let mudou = false;
+  for(const team of STATE.teams){
+    if(team.codigoAcesso && !team.codigoAcessoHash){
+      team.codigoAcessoSalt = gerarSaltSenha();
+      team.codigoAcessoHash = await hashSenhaAdmin(String(team.codigoAcesso).toUpperCase(), team.codigoAcessoSalt);
+      delete team.codigoAcesso;
+      mudou = true;
+    }
+  }
+  return mudou;
 }
 function allModalidadeOptions(){ return [...STATE.modalidades.map(m=>({key:m, label:m})), ...STATE.modalidadesIndividuais]; }
 /* "Artística" é uma opção adicional, exclusiva do campo "Modalidades" dos Inscritos — não entra
@@ -2966,17 +3006,26 @@ async function attemptLogin(){
     document.getElementById('loginError').style.display='block';
   }
 }
-/* Acesso restrito de uma Equipe: compara o código digitado com o codigoAcesso de cada
-   Equipe (não diferencia maiúscula/minúscula, já que o campo já força maiúsculas
-   visualmente). Encontrando, entra no modo restrito — ver accessoEquipeId e
-   renderAcessoEquipeView() — sem nunca setar isAdmin, então nenhum botão/aba de
-   administrador fica disponível nesse modo. */
-function attemptLoginCodigoEquipe(){
-  const val = document.getElementById('loginCodigoEquipe').value.trim();
-  const team = val ? STATE.teams.find(t=> t.codigoAcesso && t.codigoAcesso.toUpperCase()===val.toUpperCase()) : null;
-  if(team){
-    accessoEquipeId = team.id;
-    try{ sessionStorage.setItem(TEAM_ACCESS_SESSION_KEY, team.id); }catch(e){}
+/* Acesso restrito de uma Equipe: compara o HASH do código digitado (não o texto puro —
+   ver correção de segurança em gerarCodigoAcessoEquipe) com o hash salvo em cada Equipe.
+   Precisa checar equipe por equipe (cada uma tem seu próprio salt), então é assíncrona.
+   Não diferencia maiúscula/minúscula (mesma convenção usada ao gerar/mostrar o código).
+   Encontrando, entra no modo restrito — ver accessoEquipeId e renderAcessoEquipeView()
+   — sem nunca setar isAdmin, então nenhum botão/aba de administrador fica disponível
+   nesse modo. */
+async function attemptLoginCodigoEquipe(){
+  const val = document.getElementById('loginCodigoEquipe').value.trim().toUpperCase();
+  let teamEncontrado = null;
+  if(val){
+    for(const team of STATE.teams){
+      if(!team.codigoAcessoHash || !team.codigoAcessoSalt) continue;
+      const hashDigitado = await hashSenhaAdmin(val, team.codigoAcessoSalt);
+      if(hashDigitado === team.codigoAcessoHash){ teamEncontrado = team; break; }
+    }
+  }
+  if(teamEncontrado){
+    accessoEquipeId = teamEncontrado.id;
+    try{ sessionStorage.setItem(TEAM_ACCESS_SESSION_KEY, teamEncontrado.id); }catch(e){}
     closeLoginModal();
     renderAll();
   } else {
@@ -2991,6 +3040,7 @@ function doLogout(){
 }
 function doLogoutAcessoEquipe(){
   accessoEquipeId = null;
+  aeEditandoId = null;
   try{ sessionStorage.removeItem(TEAM_ACCESS_SESSION_KEY); }catch(e){}
   renderAll();
 }
@@ -4806,8 +4856,8 @@ function renderEquipesContentHtml(){
 
   ${isAdmin ? `<div class="card">
     <h2>Códigos de Acesso — Cadastro de Inscritos</h2>
-    <p class="hint">Gere um código para uma Equipe e repasse para um representante dela (professor, responsável, capitão). Com esse código — sem precisar da senha de administrador — a pessoa consegue cadastrar os inscritos da própria Equipe, e só isso; nenhuma outra parte do painel fica visível ou editável.</p>
-    <table><thead><tr><th>equipe</th><th>Código</th><th></th></tr></thead><tbody id="codigosAcessoBody"></tbody></table>
+    <p class="hint">Gere um código para uma Equipe e repasse para um representante dela (professor, responsável, capitão). Com esse código — sem precisar da senha de administrador — a pessoa consegue cadastrar os inscritos da própria Equipe, e só isso; nenhuma outra parte do painel fica visível ou editável. O código só é mostrado uma vez, no momento em que é gerado — anote ou copie na hora, pois não é possível vê-lo de novo depois (só gerar um código novo).</p>
+    <table><thead><tr><th>equipe</th><th>Código</th><th>Inscritos</th><th></th></tr></thead><tbody id="codigosAcessoBody"></tbody></table>
   </div>` : ''}
 
   <div class="card">
@@ -4954,44 +5004,40 @@ function renderAglutinadoresList(){
     });
   });
 }
-/* Lista, na sub-aba Equipes, o código de acesso de cadastro (se já gerado) de cada
-   Equipe, com botões pra gerar/regenerar e copiar. Regenerar invalida o código anterior
-   na hora — qualquer sessão de representante de Equipe já aberta com o código antigo
-   continua funcionando até sair (ver accessoEquipeId), mas o código velho não serve mais
-   pra ENTRAR de novo. */
+/* Lista, na sub-aba Equipes, o status do código de acesso de cadastro (gerado ou não —
+   NUNCA o texto puro em si, ver correção de segurança) de cada Equipe, com botão pra
+   gerar/regenerar, e quantos inscritos ela já tem (contexto útil pra saber se o código
+   já está sendo usado). Regenerar invalida o código anterior na hora — qualquer sessão
+   de representante de Equipe já aberta com o código antigo continua funcionando até
+   sair (ver accessoEquipeId), mas o código velho não serve mais pra ENTRAR de novo. */
 function renderCodigosAcessoBody(){
   const body = document.getElementById('codigosAcessoBody');
   if(!body) return;
-  body.innerHTML = STATE.teams.map(t=>`<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
-    <td class="mono">${t.codigoAcesso ? escPdf(t.codigoAcesso) : '<span class="hint">Nenhum código gerado</span>'}</td>
-    <td>
-      <button class="btn secondary small gerarCodigoAcesso">${t.codigoAcesso?'🔄 Gerar novo':'🔑 Gerar código'}</button>
-      ${t.codigoAcesso ? `<button class="btn secondary small copiarCodigoAcesso">📋 Copiar</button>` : ''}
-    </td></tr>`).join('') || '<tr><td colspan="3" class="hint">Nenhuma equipe cadastrada.</td></tr>';
+  body.innerHTML = STATE.teams.map(t=>{
+    const qtdInscritos = STATE.inscritos.filter(a=>a.teamId===t.id).length;
+    return `<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
+      <td>${t.codigoAcessoHash ? '<span class="hint" style="margin:0;">🔒 Código gerado</span>' : '<span class="hint" style="margin:0;">Nenhum código gerado</span>'}</td>
+      <td class="mono">${qtdInscritos}</td>
+      <td><button class="btn secondary small gerarCodigoAcesso">${t.codigoAcessoHash?'🔄 Gerar novo':'🔑 Gerar código'}</button></td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="hint">Nenhuma equipe cadastrada.</td></tr>';
   body.querySelectorAll('.gerarCodigoAcesso').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const teamId = btn.closest('tr').dataset.team;
       const team = STATE.teams.find(t=>t.id===teamId);
       if(!team) return;
-      const gerar = ()=>{ team.codigoAcesso = gerarCodigoAcessoEquipe(); markDirty(); renderCodigosAcessoBody(); };
-      if(team.codigoAcesso){
-        showConfirm(`Gerar um novo código de acesso para "${team.label}"? O código atual (${team.codigoAcesso}) para de funcionar imediatamente para quem tentar entrar com ele depois disso.`, gerar);
+      const gerar = async ()=>{
+        const codigoPlano = await definirCodigoAcessoEquipe(team);
+        renderCodigosAcessoBody();
+        let copiadoOk = false;
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          try{ await navigator.clipboard.writeText(codigoPlano); copiadoOk = true; }catch(e){}
+        }
+        showAlert(`Novo código de acesso para "${team.label}": ${codigoPlano}\n\n${copiadoOk?'Já copiado pra área de transferência.\n\n':''}Anote ou repasse agora — por segurança, esse código não fica salvo em texto puro em lugar nenhum, e não será possível vê-lo de novo depois de fechar este aviso (só gerar um código novo).`);
+      };
+      if(team.codigoAcessoHash){
+        showConfirm(`Gerar um novo código de acesso para "${team.label}"? O código atual para de funcionar imediatamente para quem tentar entrar com ele depois disso.`, gerar);
       } else {
         gerar();
-      }
-    });
-  });
-  body.querySelectorAll('.copiarCodigoAcesso').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const teamId = btn.closest('tr').dataset.team;
-      const team = STATE.teams.find(t=>t.id===teamId);
-      if(!team || !team.codigoAcesso) return;
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(team.codigoAcesso)
-          .then(()=> showAlert(`Código de "${team.label}" copiado: ${team.codigoAcesso}`))
-          .catch(()=> showAlert(`Código de "${team.label}": ${team.codigoAcesso}`));
-      } else {
-        showAlert(`Código de "${team.label}": ${team.codigoAcesso}`);
       }
     });
   });
@@ -8684,6 +8730,7 @@ function renderAll(){
    de admin (nome obrigatório, restrição/alergia descritas quando marcadas, aviso de
    nome duplicado) — só que sem seletor de Equipe (sempre a mesma) e sem os campos que
    não fazem sentido aqui (cor, etc.). */
+let aeEditandoId = null; // null = formulário em modo "adicionar"; caso contrário, id do inscrito sendo editado (ver aeAdd)
 function renderAcessoEquipeView(){
   const team = STATE.teams.find(t=>t.id===accessoEquipeId);
   if(!team){ doLogoutAcessoEquipe(); return; } // a Equipe foi removida nesse meio-tempo — não há mais pra onde voltar
@@ -8703,59 +8750,66 @@ function renderAcessoEquipeView(){
 
   const modOptions = inscritoModalidadeOptions();
   const inscritosDaEquipe = STATE.inscritos.filter(a=>a.teamId===team.id).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  // Se o inscrito em edição não existe mais (foi removido em outro dispositivo nesse
+  // meio-tempo), volta pro modo "adicionar" em vez de mostrar um formulário órfão.
+  const editando = aeEditandoId ? STATE.inscritos.find(a=>a.id===aeEditandoId && a.teamId===team.id) : null;
+  if(aeEditandoId && !editando) aeEditandoId = null;
 
   document.getElementById('main').innerHTML = `
   <div class="card">
-    <h2>Cadastrar Inscrito — ${escPdf(team.label)}</h2>
+    <h2>${editando ? `Editar Inscrito — ${escPdf(editando.nome)}` : `Cadastrar Inscrito — ${escPdf(team.label)}`}</h2>
     <div class="row">
-      <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;"></div>
-      <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+      <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;" value="${editando?escPdf(editando.nome):''}"></div>
+      <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F" ${editando&&editando.genero==='F'?'selected':''}>Feminino</option><option value="M" ${editando&&editando.genero==='M'?'selected':''}>Masculino</option></select></div>
       <div class="field">
         <label class="f-label">Foto</label>
         <div class="row" style="align-items:center; gap:8px;">
           <div id="alFotoPreviewWrap" style="width:46px; height:46px; border-radius:8px; overflow:hidden; background:var(--bg); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;">
             <span class="hint" style="margin:0; text-align:center; padding:0 4px; font-size:10px;">Sem foto</span>
           </div>
-          <button class="btn secondary small" type="button" id="alAbrirFoto">📷 Adicionar foto</button>
+          <button class="btn secondary small" type="button" id="alAbrirFoto">📷 ${editando?'Trocar foto':'Adicionar foto'}</button>
         </div>
       </div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
-      <div class="row" id="aeModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="aeModCheck" value="${escPdf(o.key)}"> ${escPdf(o.label)}</label>`).join('')}</div>
+      <div class="row" id="aeModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="aeModCheck" value="${escPdf(o.key)}" ${editando&&(editando.modalidades||[]).includes(o.key)?'checked':''}> ${escPdf(o.label)}</label>`).join('')}</div>
     </div>
     <div class="row" style="margin-top:14px; align-items:flex-start;">
       <div class="field">
         <label class="f-label">Possui restrição alimentar?</label>
-        <select id="aeTemRestricao"><option value="nao">Não</option><option value="sim">Sim</option></select>
+        <select id="aeTemRestricao"><option value="nao" ${editando&&!editando.restricaoAlimentar?'selected':''}>Não</option><option value="sim" ${editando&&editando.restricaoAlimentar?'selected':''}>Sim</option></select>
       </div>
-      <div class="field" id="aeRestricaoWrap" style="display:none; flex:1; min-width:260px;">
+      <div class="field" id="aeRestricaoWrap" style="display:${editando&&editando.restricaoAlimentar?'':'none'}; flex:1; min-width:260px;">
         <label class="f-label">Quais restrições (separadas por vírgula)</label>
-        <input type="text" id="aeRestricoesTexto" placeholder="Ex.: lactose, glúten, amendoim" style="width:100%;">
+        <input type="text" id="aeRestricoesTexto" placeholder="Ex.: lactose, glúten, amendoim" style="width:100%;" value="${editando?escPdf(editando.restricoesAlimentares||''):''}">
       </div>
     </div>
     <div class="row" style="margin-top:10px; align-items:flex-start;">
       <div class="field">
         <label class="f-label">Possui alergia a medicamento?</label>
-        <select id="aeTemAlergia"><option value="nao">Não</option><option value="sim">Sim</option></select>
+        <select id="aeTemAlergia"><option value="nao" ${editando&&!editando.alergiaMedicamento?'selected':''}>Não</option><option value="sim" ${editando&&editando.alergiaMedicamento?'selected':''}>Sim</option></select>
       </div>
-      <div class="field" id="aeAlergiaWrap" style="display:none; flex:1; min-width:260px;">
+      <div class="field" id="aeAlergiaWrap" style="display:${editando&&editando.alergiaMedicamento?'':'none'}; flex:1; min-width:260px;">
         <label class="f-label">Quais alergias (separadas por vírgula)</label>
-        <input type="text" id="aeAlergiasTexto" placeholder="Ex.: dipirona, penicilina" style="width:100%;">
+        <input type="text" id="aeAlergiasTexto" placeholder="Ex.: dipirona, penicilina" style="width:100%;" value="${editando?escPdf(editando.alergias||''):''}">
       </div>
     </div>
     <div class="row" style="margin-top:14px;">
-      <button class="btn" id="aeAdd">+ Adicionar inscrito</button>
+      <button class="btn" id="aeAdd">${editando?'💾 Salvar alterações':'+ Adicionar inscrito'}</button>
+      ${editando?'<button class="btn secondary" id="aeCancelarEdicao">Cancelar edição</button>':''}
     </div>
   </div>
   <div class="card">
     <h2>Inscritos já cadastrados em ${escPdf(team.label)}</h2>
+    <p class="hint">Escaneie o QR Code de um crachá já impresso pra editar rapidamente os dados dessa pessoa.</p>
+    <button class="btn secondary small" id="aeScanBtn" style="margin-bottom:10px;">📷 Escanear QR Code pra editar</button>
     <table><thead><tr><th>Foto</th><th>Nome</th><th>Gênero</th><th>Modalidades</th><th></th></tr></thead><tbody>
       ${inscritosDaEquipe.map(a=>{
         const fotoUrl = imgGet(a.foto);
         return `<tr data-id="${a.id}"><td><button type="button" class="aeFotoThumbBtn" title="Adicionar/trocar foto" style="border:none; background:none; cursor:pointer; padding:0;">${fotoUrl ? `<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" style="width:34px; height:34px; border-radius:6px; object-fit:cover;">` : `<span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:6px; background:var(--bg); border:1px solid var(--border); font-size:15px;">📷</span>`}</button></td>
         <td>${escPdf(a.nome)}</td><td>${a.genero==='F'?'Feminino':'Masculino'}</td>
         <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
-        <td><button class="btn danger small aeRemove">✕ Remover</button></td></tr>`;
+        <td><button class="btn secondary small aeEditar">✏️ Editar</button> <button class="btn danger small aeRemove">✕ Remover</button></td></tr>`;
       }).join('') || '<tr><td colspan="5" class="hint">Nenhum inscrito cadastrado ainda nesta Equipe.</td></tr>'}
     </tbody></table>
   </div>`;
@@ -8763,12 +8817,40 @@ function renderAcessoEquipeView(){
   document.getElementById('btnSairAcessoEquipe').addEventListener('click', doLogoutAcessoEquipe);
   document.getElementById('aeTemRestricao').addEventListener('change', (e)=>{ document.getElementById('aeRestricaoWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
   document.getElementById('aeTemAlergia').addEventListener('change', (e)=>{ document.getElementById('aeAlergiaWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
-  document.getElementById('alAbrirFoto').addEventListener('click', ()=> openFotoModal(null));
+  document.getElementById('alAbrirFoto').addEventListener('click', ()=> openFotoModal(editando ? editando.id : null));
   updateAlNovaFotoPreview();
   document.querySelectorAll('.aeFotoThumbBtn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = Number(btn.closest('tr').dataset.id);
       openFotoModal(id);
+    });
+  });
+  const cancelarBtn = document.getElementById('aeCancelarEdicao');
+  if(cancelarBtn) cancelarBtn.addEventListener('click', ()=>{ aeEditandoId = null; renderAcessoEquipeView(); });
+
+  document.querySelectorAll('.aeEditar').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      aeEditandoId = Number(btn.closest('tr').dataset.id);
+      renderAcessoEquipeView();
+    });
+  });
+
+  document.getElementById('aeScanBtn').addEventListener('click', ()=>{
+    openQrScanModal(texto=>{
+      const result = findInscritoPorCodigoOuNome(texto);
+      if(result.status==='empty'){ showAlert('Escaneie ou digite o nome ou o código do inscrito.'); return false; }
+      if(result.status==='notfound'){ showAlert('Inscrito não encontrado. Confira o código ou o nome.'); return false; }
+      if(result.status==='ambiguous'){
+        showAlert('Mais de um inscrito encontrado com esse nome. Use o código do crachá pra identificar com precisão.');
+        return false;
+      }
+      if(result.inscrito.teamId !== team.id){
+        showAlert(`Esse crachá pertence a outra Equipe (${teamLabel(result.inscrito.teamId)}), não a ${team.label} — não é possível editá-lo por aqui.`);
+        return false;
+      }
+      aeEditandoId = result.inscrito.id;
+      renderAcessoEquipeView();
+      return true;
     });
   });
 
@@ -8783,6 +8865,25 @@ function renderAcessoEquipeView(){
     if(!nome){ showAlert('Informe o nome do inscrito.'); return; }
     if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
     if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
+
+    if(editando){
+      const salvarEdicao = ()=>{
+        editando.nome = nome; editando.genero = genero; editando.modalidades = mods;
+        editando.restricaoAlimentar = temRestricao; editando.restricoesAlimentares = restricoesAlimentares;
+        editando.alergiaMedicamento = temAlergia; editando.alergias = alergiasMedicamento;
+        if(alNovoFotoDataUrl){ editando.foto = imgSet('foto_'+editando.id, alNovoFotoDataUrl); alNovoFotoDataUrl = null; }
+        aeEditandoId = null;
+        markDirty();
+        renderAcessoEquipeView();
+      };
+      const duplicado = STATE.inscritos.some(a=> a.id!==editando.id && a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+      if(duplicado){
+        showConfirm(`Já existe outro inscrito chamado "${nome}" em ${team.label}. Salvar mesmo assim?`, salvarEdicao);
+      } else {
+        salvarEdicao();
+      }
+      return;
+    }
 
     const criarInscrito = ()=>{
       const novoInscritoId = nextInscritoId();
@@ -8813,6 +8914,7 @@ function renderAcessoEquipeView(){
       showConfirm(`Remover "${inscrito.nome}"?`, ()=>{
         imgSet('foto_'+id, null);
         STATE.inscritos = STATE.inscritos.filter(a=>a.id!==id);
+        if(aeEditandoId===id) aeEditandoId = null;
         markDirty();
         renderAcessoEquipeView();
       });
@@ -8918,6 +9020,7 @@ function mostrarErroCarregamentoInicial(){
   // aparecerem corretamente na primeira tela.
   await hydrateImageCache();
   if(migrateInlineImagesToCloud()) await saveState();
+  if(await migrarCodigosAcessoLegados()) await saveState();
   await finalizarSenhaAdminSeNecessario();
   restoreAdminSession();
   restoreAcessoEquipeSession();
