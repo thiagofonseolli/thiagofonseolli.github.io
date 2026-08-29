@@ -200,10 +200,10 @@
         <button id="btnMoreOptions">⋯ Mais opções</button>
         <div class="dropdown-menu" id="moreOptionsMenu">
           <button id="btnPainelPopup">📊 Painel Geral</button>
-          <button id="btnExport">⬇️ Exportar backup</button>
-          <button id="btnImport">⬆️ Importar backup</button>
-          <input type="file" id="importFile" accept="application/json" style="display:none;">
           <div class="dropdown-divider" id="adminOnlyDivider" style="display:none;"></div>
+          <button id="btnExport" style="display:none;">⬇️ Exportar backup</button>
+          <button id="btnImport" style="display:none;">⬆️ Importar backup</button>
+          <input type="file" id="importFile" accept="application/json" style="display:none;">
           <button id="btnChangePassword" style="display:none;">🔑 Alterar senha</button>
           <button id="btnEditHeader" style="display:none;">🖼️ Editar cabeçalho</button>
           <button id="btnOrganizarAbas" style="display:none;">🗂️ Organizar abas</button>
@@ -3367,6 +3367,16 @@ function renderHeaderBlock(){
   if(clearBtn) clearBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const pwBtn = document.getElementById('btnChangePassword');
   if(pwBtn) pwBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  // "Exportar backup" baixa uma cópia de TODO o STATE (nomes, restrições alimentares,
+  // alergias a medicamento, fotos de cada inscrito) — achado real: como Painel/Edital
+  // são públicos, esse botão ficava visível E funcionando pra QUALQUER visitante, sem
+  // login nenhum, expondo dados sensíveis de saúde/identificação de alunos com um único
+  // clique. "Importar backup" já checava isAdmin() no clique (não sobrescrevia dados por
+  // engano), mas continuava visível mesmo pra quem não conseguia usá-lo — inconsistente.
+  const exportBtn = document.getElementById('btnExport');
+  if(exportBtn) exportBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  const importBtn = document.getElementById('btnImport');
+  if(importBtn) importBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const adminDivider = document.getElementById('adminOnlyDivider');
   if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
 }
@@ -9137,7 +9147,7 @@ function mostrarErroCarregamentoInicial(){
   restoreAcessoEquipeSession();
   document.title = STATE.eventName + ' — Painel de Gestão';
   document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin || accessoEquipeId) saveState(); });
-  document.getElementById('btnExport').addEventListener('click', exportBackup);
+  document.getElementById('btnExport').addEventListener('click', ()=>{ if(isAdmin) exportBackup(); });
   document.getElementById('btnImport').addEventListener('click', ()=>{ if(isAdmin) document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files[0] && isAdmin) importBackup(e.target.files[0]); e.target.value=''; });
   document.getElementById('btnPainelPopup').addEventListener('click', openPainelModal);
