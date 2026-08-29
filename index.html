@@ -251,13 +251,27 @@
 <div class="modal-overlay" id="loginModal">
   <div class="modal-box" style="max-width:380px;">
     <button class="modal-close" id="closeLoginModal">&times;</button>
-    <h2 style="color:var(--navy); margin-top:0;">Login do Administrador</h2>
-    <p class="hint">Digite a chave de acesso para liberar edição de jogos, pontuações e cadastros.</p>
-    <div class="field"><label class="f-label">Chave de acesso</label><input type="password" id="loginPassword" style="width:100%;"></div>
-    <p id="loginError" style="color:var(--crimson); font-size:12.5px; display:none;">Chave incorreta. Tente novamente.</p>
-    <div class="modal-actions">
-      <button class="btn secondary" id="cancelLoginBtn">Cancelar</button>
-      <button class="btn" id="confirmLoginBtn">Entrar</button>
+    <div id="loginModalAdminMode">
+      <h2 style="color:var(--navy); margin-top:0;">Login do Administrador</h2>
+      <p class="hint">Digite a chave de acesso para liberar edição de jogos, pontuações e cadastros.</p>
+      <div class="field"><label class="f-label">Chave de acesso</label><input type="password" id="loginPassword" style="width:100%;"></div>
+      <p id="loginError" style="color:var(--crimson); font-size:12.5px; display:none;">Chave incorreta. Tente novamente.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="cancelLoginBtn">Cancelar</button>
+        <button class="btn" id="confirmLoginBtn">Entrar</button>
+      </div>
+      <p class="hint" style="margin-top:14px; text-align:center;"><a href="#" id="linkModoCodigoEquipe">Sou representante de uma Equipe e tenho um código de acesso</a></p>
+    </div>
+    <div id="loginModalEquipeMode" style="display:none;">
+      <h2 style="color:var(--navy); margin-top:0;">Acesso da Equipe</h2>
+      <p class="hint">Digite o código de acesso repassado pelo administrador para cadastrar os inscritos da sua Equipe.</p>
+      <div class="field"><label class="f-label">Código de acesso</label><input type="text" id="loginCodigoEquipe" style="width:100%; text-transform:uppercase;" maxlength="6"></div>
+      <p id="loginCodigoEquipeError" style="color:var(--crimson); font-size:12.5px; display:none;">Código não encontrado. Confira com o administrador.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="cancelLoginCodigoBtn">Cancelar</button>
+        <button class="btn" id="confirmLoginCodigoBtn">Entrar</button>
+      </div>
+      <p class="hint" style="margin-top:14px; text-align:center;"><a href="#" id="linkModoAdmin">Sou administrador</a></p>
     </div>
   </div>
 </div>
@@ -2102,6 +2116,25 @@ function uniqueStudentCode(){
   do{ code = generateStudentCode(); } while(STATE.inscritos.some(a=>a.codigo===code));
   return code;
 }
+/* Código de acesso restrito, dado a um representante de uma Equipe (professor,
+   responsável, capitão) para que ele mesmo cadastre os inscritos da própria Equipe, sem
+   precisar da senha de administrador nem ter acesso a mais nada do painel (jogos,
+   pontuações, outras Equipes, configurações). Alfabeto sem 0/O e 1/I/L -- caracteres
+   fáceis de confundir ao digitar ou ditar por telefone. Não é hash/criptografado (como a
+   senha de admin): o próprio administrador precisa poder VER e copiar o código pra
+   repassar à pessoa, então armazenar em texto puro é necessário aqui -- coerente com o
+   risco menor de um código vazado (só cadastra alunos numa única Equipe, nada mais).
+   Único, mas só entre Equipes -- não precisa ser globalmente único como o código do
+   inscrito, já que sempre é comparado junto com "existe uma Equipe com esse código". */
+function gerarCodigoAcessoEquipe(){
+  const alfabeto = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let codigo;
+  do{
+    codigo = '';
+    for(let i=0;i<6;i++) codigo += alfabeto[Math.floor(Math.random()*alfabeto.length)];
+  } while(STATE.teams.some(t=>t.codigoAcesso===codigo));
+  return codigo;
+}
 function allModalidadeOptions(){ return [...STATE.modalidades.map(m=>({key:m, label:m})), ...STATE.modalidadesIndividuais]; }
 /* "Artística" é uma opção adicional, exclusiva do campo "Modalidades" dos Inscritos — não entra
    nos Jogos, Súmulas nem em "Modalidades Individuais" (que são só para modalidades esportivas). */
@@ -2174,6 +2207,8 @@ let STATE = null;
 let activeTab = 'painel';
 let dirty = false;
 let isAdmin = false;
+let accessoEquipeId = null; // ID da Equipe cujo código de acesso restrito foi usado pra entrar (ver attemptLoginCodigoEquipe) — null quando não está nesse modo. Nunca fica true junto com isAdmin.
+const TEAM_ACCESS_SESSION_KEY = 'jim2026-team-access-session';
 
 /* ===================== PERSISTÊNCIA ONLINE (Supabase) =====================
    Nada é salvo no navegador — todo o estado do app vive na nuvem (Supabase), na mesma
@@ -2896,9 +2931,26 @@ function inlineImagesForExport(stateCopy){
 function restoreAdminSession(){
   try{ isAdmin = sessionStorage.getItem(ADMIN_SESSION_KEY)==='1'; }catch(e){ isAdmin = false; }
 }
+/* Restaura o modo de acesso restrito de Equipe entre uma navegação e outra na mesma
+   aba/sessão do navegador (ex.: um representante que atualiza a página no meio do
+   cadastro não perde o acesso). Só restaura se a Equipe e o código ainda baterem —
+   protege contra um código já regenerado/trocado enquanto essa sessão ficou aberta. */
+function restoreAcessoEquipeSession(){
+  try{
+    const teamId = sessionStorage.getItem(TEAM_ACCESS_SESSION_KEY);
+    if(!teamId) return;
+    const team = STATE.teams.find(t=>t.id===teamId);
+    accessoEquipeId = team ? team.id : null;
+    if(!team) sessionStorage.removeItem(TEAM_ACCESS_SESSION_KEY);
+  }catch(e){ accessoEquipeId = null; }
+}
 function openLoginModal(){
   document.getElementById('loginError').style.display='none';
   document.getElementById('loginPassword').value='';
+  document.getElementById('loginCodigoEquipeError').style.display='none';
+  document.getElementById('loginCodigoEquipe').value='';
+  document.getElementById('loginModalAdminMode').style.display='';
+  document.getElementById('loginModalEquipeMode').style.display='none';
   document.getElementById('loginModal').classList.add('open');
   setTimeout(()=> document.getElementById('loginPassword').focus(), 50);
 }
@@ -2914,10 +2966,32 @@ async function attemptLogin(){
     document.getElementById('loginError').style.display='block';
   }
 }
+/* Acesso restrito de uma Equipe: compara o código digitado com o codigoAcesso de cada
+   Equipe (não diferencia maiúscula/minúscula, já que o campo já força maiúsculas
+   visualmente). Encontrando, entra no modo restrito — ver accessoEquipeId e
+   renderAcessoEquipeView() — sem nunca setar isAdmin, então nenhum botão/aba de
+   administrador fica disponível nesse modo. */
+function attemptLoginCodigoEquipe(){
+  const val = document.getElementById('loginCodigoEquipe').value.trim();
+  const team = val ? STATE.teams.find(t=> t.codigoAcesso && t.codigoAcesso.toUpperCase()===val.toUpperCase()) : null;
+  if(team){
+    accessoEquipeId = team.id;
+    try{ sessionStorage.setItem(TEAM_ACCESS_SESSION_KEY, team.id); }catch(e){}
+    closeLoginModal();
+    renderAll();
+  } else {
+    document.getElementById('loginCodigoEquipeError').style.display='block';
+  }
+}
 function doLogout(){
   isAdmin = false;
   activeTab = 'painel';
   try{ sessionStorage.removeItem(ADMIN_SESSION_KEY); }catch(e){}
+  renderAll();
+}
+function doLogoutAcessoEquipe(){
+  accessoEquipeId = null;
+  try{ sessionStorage.removeItem(TEAM_ACCESS_SESSION_KEY); }catch(e){}
   renderAll();
 }
 function updateAdminButton(){
@@ -4730,6 +4804,12 @@ function renderEquipesContentHtml(){
   </div>
   <div class="card"><table><thead><tr><th>equipe</th><th>Gênero</th><th>Aglutinador</th><th>Cor</th><th></th></tr></thead><tbody id="teamsBody"></tbody></table></div>
 
+  ${isAdmin ? `<div class="card">
+    <h2>Códigos de Acesso — Cadastro de Inscritos</h2>
+    <p class="hint">Gere um código para uma Equipe e repasse para um representante dela (professor, responsável, capitão). Com esse código — sem precisar da senha de administrador — a pessoa consegue cadastrar os inscritos da própria Equipe, e só isso; nenhuma outra parte do painel fica visível ou editável.</p>
+    <table><thead><tr><th>equipe</th><th>Código</th><th></th></tr></thead><tbody id="codigosAcessoBody"></tbody></table>
+  </div>` : ''}
+
   <div class="card">
     <h2>Aglutinadores</h2>
     <p class="hint">Um aglutinador reúne várias Equipes sob regras específicas de competição (ex.: um subgrupo, uma chave, uma categoria especial etc.). Crie aqui os aglutinadores disponíveis; ao cadastrar ou editar uma equipe, você pode sinalizá-la com um deles no campo "Adicionar aglutinador".</p>
@@ -4814,6 +4894,7 @@ function bindEquipesEvents(){
   }
 
   renderTeamsBody();
+  renderCodigosAcessoBody();
   renderAglutinadoresList();
 }
 function bindModalidadesContentEvents(){
@@ -4870,6 +4951,48 @@ function renderAglutinadoresList(){
         STATE.teams.forEach(t=>{ if(t.aglutinadorId===id) t.aglutinadorId=null; });
         markDirty(); renderInscricoes();
       });
+    });
+  });
+}
+/* Lista, na sub-aba Equipes, o código de acesso de cadastro (se já gerado) de cada
+   Equipe, com botões pra gerar/regenerar e copiar. Regenerar invalida o código anterior
+   na hora — qualquer sessão de representante de Equipe já aberta com o código antigo
+   continua funcionando até sair (ver accessoEquipeId), mas o código velho não serve mais
+   pra ENTRAR de novo. */
+function renderCodigosAcessoBody(){
+  const body = document.getElementById('codigosAcessoBody');
+  if(!body) return;
+  body.innerHTML = STATE.teams.map(t=>`<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
+    <td class="mono">${t.codigoAcesso ? escPdf(t.codigoAcesso) : '<span class="hint">Nenhum código gerado</span>'}</td>
+    <td>
+      <button class="btn secondary small gerarCodigoAcesso">${t.codigoAcesso?'🔄 Gerar novo':'🔑 Gerar código'}</button>
+      ${t.codigoAcesso ? `<button class="btn secondary small copiarCodigoAcesso">📋 Copiar</button>` : ''}
+    </td></tr>`).join('') || '<tr><td colspan="3" class="hint">Nenhuma equipe cadastrada.</td></tr>';
+  body.querySelectorAll('.gerarCodigoAcesso').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const teamId = btn.closest('tr').dataset.team;
+      const team = STATE.teams.find(t=>t.id===teamId);
+      if(!team) return;
+      const gerar = ()=>{ team.codigoAcesso = gerarCodigoAcessoEquipe(); markDirty(); renderCodigosAcessoBody(); };
+      if(team.codigoAcesso){
+        showConfirm(`Gerar um novo código de acesso para "${team.label}"? O código atual (${team.codigoAcesso}) para de funcionar imediatamente para quem tentar entrar com ele depois disso.`, gerar);
+      } else {
+        gerar();
+      }
+    });
+  });
+  body.querySelectorAll('.copiarCodigoAcesso').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const teamId = btn.closest('tr').dataset.team;
+      const team = STATE.teams.find(t=>t.id===teamId);
+      if(!team || !team.codigoAcesso) return;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(team.codigoAcesso)
+          .then(()=> showAlert(`Código de "${team.label}" copiado: ${team.codigoAcesso}`))
+          .catch(()=> showAlert(`Código de "${team.label}": ${team.codigoAcesso}`));
+      } else {
+        showAlert(`Código de "${team.label}": ${team.codigoAcesso}`);
+      }
     });
   });
 }
@@ -8522,10 +8645,16 @@ function importBackup(file){
 
 /* ===================== MAIN RENDER ===================== */
 function renderAll(){
+  renderHeaderBlock();
+  // Modo de acesso restrito (código de Equipe, sem senha de admin): mostra só a tela de
+  // cadastro de inscritos da própria Equipe, escondendo abas e botões de administrador
+  // por completo — ver renderAcessoEquipeView().
+  if(accessoEquipeId){ renderAcessoEquipeView(); updateSaveStatus(); return; }
+  const toolbarEl = document.querySelector('.toolbar');
+  if(toolbarEl) toolbarEl.style.display = ''; // desfaz o "esconder" do modo de acesso restrito, se vinha de lá
   if(!isAdmin && activeTab!=='painel' && activeTab!=='edital') activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
   renderTabs();
   renderScoreboard();
-  renderHeaderBlock();
   updateAdminButton();
   renderViewOnlyBanner();
   if(activeTab==='painel') renderPainel();
@@ -8535,6 +8664,123 @@ function renderAll(){
   else if(activeTab==='alimentacao') renderAlimentacao();
   else if(activeTab==='edital') renderEdital();
   updateSaveStatus();
+}
+/* ===================== ACESSO RESTRITO DE EQUIPE (código, sem senha de admin) =====================
+   Tela dedicada, sem abas nem botões de administrador — só o cadastro de inscritos da
+   Equipe cujo código foi usado pra entrar (ver attemptLoginCodigoEquipe). Reaproveita as
+   mesmas validações do cadastro manual de admin (nome obrigatório, restrição/alergia
+   descritas quando marcadas, aviso de nome duplicado) — só que sem seletor de Equipe
+   (sempre a mesma) e sem os campos que não fazem sentido aqui (foto, cor, etc.). */
+function renderAcessoEquipeView(){
+  const team = STATE.teams.find(t=>t.id===accessoEquipeId);
+  if(!team){ doLogoutAcessoEquipe(); return; } // a Equipe foi removida nesse meio-tempo — não há mais pra onde voltar
+  const tabsEl = document.getElementById('tabs');
+  if(tabsEl) tabsEl.innerHTML = '';
+  const toolbarEl = document.querySelector('.toolbar');
+  if(toolbarEl) toolbarEl.style.display = 'none';
+  const oldBanner = document.getElementById('viewOnlyBanner');
+  if(oldBanner) oldBanner.remove();
+  const banner = document.createElement('div');
+  banner.id = 'viewOnlyBanner';
+  banner.className = 'banner';
+  banner.innerHTML = `👥 Acesso restrito — cadastro de inscritos de <strong>${escPdf(team.label)}</strong>. <button class="btn secondary small" id="btnSairAcessoEquipe" style="margin-left:8px;">Sair</button>`;
+  document.getElementById('main').before(banner);
+
+  const modOptions = inscritoModalidadeOptions();
+  const inscritosDaEquipe = STATE.inscritos.filter(a=>a.teamId===team.id).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+
+  document.getElementById('main').innerHTML = `
+  <div class="card">
+    <h2>Cadastrar Inscrito — ${escPdf(team.label)}</h2>
+    <div class="row">
+      <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;"></div>
+      <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+    </div>
+    <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
+      <div class="row" id="aeModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="aeModCheck" value="${escPdf(o.key)}"> ${escPdf(o.label)}</label>`).join('')}</div>
+    </div>
+    <div class="row" style="margin-top:14px; align-items:flex-start;">
+      <div class="field">
+        <label class="f-label">Possui restrição alimentar?</label>
+        <select id="aeTemRestricao"><option value="nao">Não</option><option value="sim">Sim</option></select>
+      </div>
+      <div class="field" id="aeRestricaoWrap" style="display:none; flex:1; min-width:260px;">
+        <label class="f-label">Quais restrições (separadas por vírgula)</label>
+        <input type="text" id="aeRestricoesTexto" placeholder="Ex.: lactose, glúten, amendoim" style="width:100%;">
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px; align-items:flex-start;">
+      <div class="field">
+        <label class="f-label">Possui alergia a medicamento?</label>
+        <select id="aeTemAlergia"><option value="nao">Não</option><option value="sim">Sim</option></select>
+      </div>
+      <div class="field" id="aeAlergiaWrap" style="display:none; flex:1; min-width:260px;">
+        <label class="f-label">Quais alergias (separadas por vírgula)</label>
+        <input type="text" id="aeAlergiasTexto" placeholder="Ex.: dipirona, penicilina" style="width:100%;">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <button class="btn" id="aeAdd">+ Adicionar inscrito</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Inscritos já cadastrados em ${escPdf(team.label)}</h2>
+    <table><thead><tr><th>Nome</th><th>Gênero</th><th>Modalidades</th><th></th></tr></thead><tbody>
+      ${inscritosDaEquipe.map(a=>`<tr data-id="${a.id}"><td>${escPdf(a.nome)}</td><td>${a.genero==='F'?'Feminino':'Masculino'}</td>
+        <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
+        <td><button class="btn danger small aeRemove">✕ Remover</button></td></tr>`).join('') || '<tr><td colspan="4" class="hint">Nenhum inscrito cadastrado ainda nesta Equipe.</td></tr>'}
+    </tbody></table>
+  </div>`;
+
+  document.getElementById('btnSairAcessoEquipe').addEventListener('click', doLogoutAcessoEquipe);
+  document.getElementById('aeTemRestricao').addEventListener('change', (e)=>{ document.getElementById('aeRestricaoWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
+  document.getElementById('aeTemAlergia').addEventListener('change', (e)=>{ document.getElementById('aeAlergiaWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
+
+  document.getElementById('aeAdd').addEventListener('click', ()=>{
+    const nome = document.getElementById('aeNome').value.trim();
+    const genero = document.getElementById('aeGenero').value;
+    const mods = Array.from(document.querySelectorAll('.aeModCheck:checked')).map(c=>c.value);
+    const temRestricao = document.getElementById('aeTemRestricao').value === 'sim';
+    const restricoesAlimentares = temRestricao ? document.getElementById('aeRestricoesTexto').value.trim() : '';
+    const temAlergia = document.getElementById('aeTemAlergia').value === 'sim';
+    const alergiasMedicamento = temAlergia ? document.getElementById('aeAlergiasTexto').value.trim() : '';
+    if(!nome){ showAlert('Informe o nome do inscrito.'); return; }
+    if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
+    if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
+
+    const criarInscrito = ()=>{
+      const novoInscritoId = nextInscritoId();
+      STATE.inscritos.push({
+        id:novoInscritoId, nome, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
+        restricaoAlimentar: temRestricao, restricoesAlimentares,
+        alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
+        foto: ''
+      });
+      markDirty();
+      renderAcessoEquipeView();
+    };
+
+    const jaExiste = STATE.inscritos.some(a=> a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+    if(jaExiste){
+      showConfirm(`Já existe um inscrito chamado "${nome}" em ${team.label}. Cadastrar mesmo assim?`, criarInscrito);
+    } else {
+      criarInscrito();
+    }
+  });
+
+  document.querySelectorAll('.aeRemove').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = Number(btn.closest('tr').dataset.id);
+      const inscrito = STATE.inscritos.find(a=>a.id===id);
+      if(!inscrito) return;
+      showConfirm(`Remover "${inscrito.nome}"?`, ()=>{
+        imgSet('foto_'+id, null);
+        STATE.inscritos = STATE.inscritos.filter(a=>a.id!==id);
+        markDirty();
+        renderAcessoEquipeView();
+      });
+    });
+  });
 }
 function renderViewOnlyBanner(){
   const old = document.getElementById('viewOnlyBanner');
@@ -8637,6 +8883,7 @@ function mostrarErroCarregamentoInicial(){
   if(migrateInlineImagesToCloud()) await saveState();
   await finalizarSenhaAdminSeNecessario();
   restoreAdminSession();
+  restoreAcessoEquipeSession();
   document.title = STATE.eventName + ' — Painel de Gestão';
   document.getElementById('btnSave').addEventListener('click', ()=>{ if(isAdmin) saveState(); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
@@ -8664,6 +8911,21 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('confirmLoginBtn').addEventListener('click', attemptLogin);
   document.getElementById('loginPassword').addEventListener('keydown', (e)=>{ if(e.key==='Enter') attemptLogin(); });
   document.getElementById('loginModal').addEventListener('click', (e)=>{ if(e.target.id==='loginModal') closeLoginModal(); });
+  document.getElementById('cancelLoginCodigoBtn').addEventListener('click', closeLoginModal);
+  document.getElementById('confirmLoginCodigoBtn').addEventListener('click', attemptLoginCodigoEquipe);
+  document.getElementById('loginCodigoEquipe').addEventListener('keydown', (e)=>{ if(e.key==='Enter') attemptLoginCodigoEquipe(); });
+  document.getElementById('linkModoCodigoEquipe').addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('loginModalAdminMode').style.display = 'none';
+    document.getElementById('loginModalEquipeMode').style.display = '';
+    setTimeout(()=> document.getElementById('loginCodigoEquipe').focus(), 50);
+  });
+  document.getElementById('linkModoAdmin').addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('loginModalEquipeMode').style.display = 'none';
+    document.getElementById('loginModalAdminMode').style.display = '';
+    setTimeout(()=> document.getElementById('loginPassword').focus(), 50);
+  });
   document.getElementById('btnEditHeader').addEventListener('click', openHeaderModal);
   document.getElementById('btnOrganizarAbas').addEventListener('click', openTabOrderModal);
   document.getElementById('closeTabOrderModal').addEventListener('click', closeTabOrderModal);
