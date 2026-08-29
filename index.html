@@ -5104,7 +5104,7 @@ let fotoStream = null;         // MediaStream ativo da webcam, enquanto ligada
 let alNovoFotoDataUrl = null;  // foto escolhida para o próximo inscrito a ser cadastrado no formulário
 
 function openFotoModal(inscritoId){
-  if(!isAdmin) return;
+  if(!isAdmin && !accessoEquipeId) return; // permitido pra admin OU pra quem entrou com código de Equipe (ver renderAcessoEquipeView)
   fotoTargetInscritoId = inscritoId || null;
   fotoPendingDataUrl = inscritoId
     ? (imgGet((STATE.inscritos.find(x=>x.id===inscritoId)||{}).foto) || null)
@@ -5182,7 +5182,13 @@ function captureFotoWebcam(){
 function saveFotoModal(){
   if(fotoTargetInscritoId){
     const a = STATE.inscritos.find(x=>x.id===fotoTargetInscritoId);
-    if(a){ a.foto = imgSet('foto_'+a.id, fotoPendingDataUrl); markDirty(); renderInscritosBody(); }
+    if(a){
+      a.foto = imgSet('foto_'+a.id, fotoPendingDataUrl);
+      markDirty();
+      // A mesma tela de foto é usada tanto pela Lista de Inscritos do admin quanto pela
+      // tela de acesso restrito de Equipe — atualiza a que estiver de fato na tela.
+      if(accessoEquipeId) renderAcessoEquipeView(); else renderInscritosBody();
+    }
   } else {
     alNovoFotoDataUrl = fotoPendingDataUrl || null;
     updateAlNovaFotoPreview();
@@ -8695,6 +8701,15 @@ function renderAcessoEquipeView(){
     <div class="row">
       <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;"></div>
       <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+      <div class="field">
+        <label class="f-label">Foto</label>
+        <div class="row" style="align-items:center; gap:8px;">
+          <div id="alFotoPreviewWrap" style="width:46px; height:46px; border-radius:8px; overflow:hidden; background:var(--bg); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;">
+            <span class="hint" style="margin:0; text-align:center; padding:0 4px; font-size:10px;">Sem foto</span>
+          </div>
+          <button class="btn secondary small" type="button" id="alAbrirFoto">📷 Adicionar foto</button>
+        </div>
+      </div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
       <div class="row" id="aeModalidadesChecks">${modOptions.map(o=>`<label style="font-size:12.5px; display:flex; align-items:center; gap:4px;"><input type="checkbox" class="aeModCheck" value="${escPdf(o.key)}"> ${escPdf(o.label)}</label>`).join('')}</div>
@@ -8725,16 +8740,28 @@ function renderAcessoEquipeView(){
   </div>
   <div class="card">
     <h2>Inscritos já cadastrados em ${escPdf(team.label)}</h2>
-    <table><thead><tr><th>Nome</th><th>Gênero</th><th>Modalidades</th><th></th></tr></thead><tbody>
-      ${inscritosDaEquipe.map(a=>`<tr data-id="${a.id}"><td>${escPdf(a.nome)}</td><td>${a.genero==='F'?'Feminino':'Masculino'}</td>
+    <table><thead><tr><th>Foto</th><th>Nome</th><th>Gênero</th><th>Modalidades</th><th></th></tr></thead><tbody>
+      ${inscritosDaEquipe.map(a=>{
+        const fotoUrl = imgGet(a.foto);
+        return `<tr data-id="${a.id}"><td><button type="button" class="aeFotoThumbBtn" title="Adicionar/trocar foto" style="border:none; background:none; cursor:pointer; padding:0;">${fotoUrl ? `<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" style="width:34px; height:34px; border-radius:6px; object-fit:cover;">` : `<span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:6px; background:var(--bg); border:1px solid var(--border); font-size:15px;">📷</span>`}</button></td>
+        <td>${escPdf(a.nome)}</td><td>${a.genero==='F'?'Feminino':'Masculino'}</td>
         <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
-        <td><button class="btn danger small aeRemove">✕ Remover</button></td></tr>`).join('') || '<tr><td colspan="4" class="hint">Nenhum inscrito cadastrado ainda nesta Equipe.</td></tr>'}
+        <td><button class="btn danger small aeRemove">✕ Remover</button></td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="hint">Nenhum inscrito cadastrado ainda nesta Equipe.</td></tr>'}
     </tbody></table>
   </div>`;
 
   document.getElementById('btnSairAcessoEquipe').addEventListener('click', doLogoutAcessoEquipe);
   document.getElementById('aeTemRestricao').addEventListener('change', (e)=>{ document.getElementById('aeRestricaoWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
   document.getElementById('aeTemAlergia').addEventListener('change', (e)=>{ document.getElementById('aeAlergiaWrap').style.display = e.target.value==='sim' ? '' : 'none'; });
+  document.getElementById('alAbrirFoto').addEventListener('click', ()=> openFotoModal(null));
+  updateAlNovaFotoPreview();
+  document.querySelectorAll('.aeFotoThumbBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = Number(btn.closest('tr').dataset.id);
+      openFotoModal(id);
+    });
+  });
 
   document.getElementById('aeAdd').addEventListener('click', ()=>{
     const nome = document.getElementById('aeNome').value.trim();
@@ -8754,8 +8781,9 @@ function renderAcessoEquipeView(){
         id:novoInscritoId, nome, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
         restricaoAlimentar: temRestricao, restricoesAlimentares,
         alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
-        foto: ''
+        foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl)
       });
+      alNovoFotoDataUrl = null;
       markDirty();
       renderAcessoEquipeView();
     };
