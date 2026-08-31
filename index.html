@@ -2834,18 +2834,69 @@ async function syncPuxarNovidades(){
    Guardadas como arquivo de verdade (não texto) no Supabase Storage — é a ÚNICA cópia
    que existe; qualquer visitante busca de lá (ver ARMAZENAMENTO DE IMAGENS, acima). */
 function syncStorageUrl(ref){ return `${SUPABASE_URL}/storage/v1/object/public/${SYNC_STORAGE_BUCKET}/${encodeURIComponent(ref)}.png`; }
-/* Referências de imagem cujo ENVIO falhou (rede instável, Storage fora do ar) e ainda
-   não foi confirmado com sucesso — diferente do texto/referência em si (que já sincroniza
-   com retry automático, ver correção em syncEnviarPendentes()), o upload da imagem de
-   verdade era "melhor esforço": se falhasse, o erro era simplesmente engolido, sem
-   nenhuma nova tentativa depois. Isso deixava a REFERÊNCIA (ex.: "header_logo") apontando
-   pra um arquivo que nunca chegou a existir no Storage — outros dispositivos veriam a
-   referência salva, mas a imagem quebrada, sem nenhum jeito automático de se recuperar. */
+/* Referências de imagem cujo ENVIO ainda não foi confirmado com sucesso (rede instável,
+   Storage fora do ar) — diferente do texto/referência em si (que já sincroniza com retry
+   automático, ver correção em syncEnviarPendentes()), o upload da imagem de verdade
+   já foi "melhor esforço" no passado: se falhasse, o erro era engolido sem nova
+   tentativa. Isso deixava a REFERÊNCIA (ex.: "header_logo") apontando pra um arquivo que
+   nunca chegou a existir no Storage — outros dispositivos veriam a referência salva, mas
+   a imagem quebrada, sem nenhum jeito automático de se recuperar.
+
+   syncRetentarImagensPendentes() (mais abaixo) já resolve isso ENQUANTO a aba
+   permanece aberta (reenvia a cada ciclo de sync). O que faltava: se a aba fosse
+   recarregada ou fechada antes do retry terminar com sucesso — bem provável logo após
+   enviar várias fotos de uma vez (import de backup, migração) — a fila (só em memória)
+   e o cache da imagem (IMG_CACHE, também só em memória) se perdiam por completo, e a
+   referência ficava quebrada PRA SEMPRE, sem nenhum outro dispositivo saber que
+   precisava reenviar (só o dispositivo original tinha os bytes da imagem).
+
+   Agora a fila (com a própria imagem, não só a referência) é espelhada no
+   sessionStorage desta aba — mesmo padrão já usado para a sessão de login (ver
+   ADMIN_SESSION_KEY/TEAM_ACCESS_SESSION_KEY). Isso cobre o caso mais comum (recarregar
+   a mesma aba após uma falha de rede): ao reabrir, restaurarImagensPendentesEnvio() (ver
+   init()) repõe a fila e tenta de novo automaticamente. NÃO cobre fechar a aba de vez
+   sem nunca mais voltar nela — nesse caso, como só esse dispositivo tinha a imagem, não
+   há como recuperar; a referência fica quebrada e precisa de um novo upload manual (a
+   foto/logo continua podendo ser trocada normalmente pela interface). */
+const PENDING_IMG_SESSION_KEY = 'jim2026-imagens-pendentes-envio';
 const syncImagensPendentesEnvio = new Set();
+function persistirImagensPendentesEnvio(){
+  try{
+    if(syncImagensPendentesEnvio.size===0){ sessionStorage.removeItem(PENDING_IMG_SESSION_KEY); return; }
+    const obj = {};
+    for(const ref of syncImagensPendentesEnvio){
+      const dataUrl = IMG_CACHE.get(ref);
+      if(dataUrl) obj[ref] = dataUrl;
+    }
+    sessionStorage.setItem(PENDING_IMG_SESSION_KEY, JSON.stringify(obj));
+  }catch(e){ /* sessionStorage indisponível ou cheio -- perde só essa robustez extra, não trava o app */ }
+}
+/* Chamada uma vez, na inicialização (ver init()), antes do primeiro retry do ciclo de
+   sync -- repõe no cache em memória (IMG_CACHE) e na fila de pendentes qualquer imagem
+   cujo envio não tinha sido confirmado quando a aba foi recarregada. */
+function restaurarImagensPendentesEnvio(){
+  try{
+    const raw = sessionStorage.getItem(PENDING_IMG_SESSION_KEY);
+    if(!raw) return;
+    const obj = JSON.parse(raw);
+    for(const ref of Object.keys(obj)){
+      if(!IMG_CACHE.has(ref)) IMG_CACHE.set(ref, obj[ref]); // não sobrescreve se algo mais recente já estiver no cache
+      syncImagensPendentesEnvio.add(ref);
+    }
+  }catch(e){ try{ sessionStorage.removeItem(PENDING_IMG_SESSION_KEY); }catch(e2){} } // entrada corrompida -- descarta em vez de travar toda vez
+}
 async function syncEnviarImagemComRetry(ref, dataUrl){
+  // Marca como pendente ANTES de tentar (não só depois de uma falha confirmada) --
+  // assim, mesmo que a aba feche bem no meio da tentativa (nem sucesso nem erro chegam
+  // a ser processados), a entrada já está persistida e será retomada na próxima vez que
+  // esta aba for recarregada. Reenviar de novo por segurança é inofensivo (o upload usa
+  // x-upsert:true -- sobrescrever um arquivo já existente com o mesmo conteúdo é
+  // idempotente).
+  syncImagensPendentesEnvio.add(ref);
+  persistirImagensPendentesEnvio();
   const ok = await syncEnviarImagem(ref, dataUrl);
   if(ok) syncImagensPendentesEnvio.delete(ref);
-  else syncImagensPendentesEnvio.add(ref);
+  persistirImagensPendentesEnvio();
 }
 /* Tenta reenviar, a cada ciclo de sincronização, qualquer imagem cujo envio tenha
    falhado antes — usando a mesma data URL já em cache (IMG_CACHE), sem precisar que o
@@ -2855,7 +2906,7 @@ async function syncRetentarImagensPendentes(){
   if(syncImagensPendentesEnvio.size===0) return;
   await Promise.all(Array.from(syncImagensPendentesEnvio).map(ref=>{
     const dataUrl = imgGet(ref);
-    if(!dataUrl){ syncImagensPendentesEnvio.delete(ref); return Promise.resolve(); }
+    if(!dataUrl){ syncImagensPendentesEnvio.delete(ref); persistirImagensPendentesEnvio(); return Promise.resolve(); }
     return syncEnviarImagemComRetry(ref, dataUrl);
   }));
 }
@@ -9163,6 +9214,13 @@ function mostrarErroCarregamentoInicial(){
     return; // não segue pro resto do init() -- a interface só é revelada quando os dados realmente chegam (ou a pessoa recarrega e tenta de novo)
   }
   syncTimer = setInterval(syncCiclo, SYNC_INTERVAL_MS); // ciclos seguintes, em segundo plano, sempre ativos
+  // Repõe (desta mesma aba, via sessionStorage) qualquer imagem cujo envio ainda não
+  // tinha sido confirmado quando a página foi recarregada da última vez -- ver comentário
+  // em cima de PENDING_IMG_SESSION_KEY. Feito antes de hydrateImageCache() para essas
+  // imagens já aparecerem corretamente (do cache local) mesmo enquanto o reenvio ainda
+  // não terminou.
+  restaurarImagensPendentesEnvio();
+  syncRetentarImagensPendentes(); // tenta reenviar já, sem esperar até 20s pelo próximo ciclo automático
   // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
   // em STATE (agora populado pela sincronização acima) e migra automaticamente eventuais
   // imagens antigas que ainda estejam salvas "cruas" (base64) dentro de STATE — backups
