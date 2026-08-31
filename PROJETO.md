@@ -37,8 +37,9 @@ Não existe servidor/backend próprio — o `index.html` fala direto com a API
 REST do Supabase. A URL do projeto e a chave pública (anon key) ficam
 embutidas no próprio arquivo (isso é esperado e normal: são credenciais
 públicas por design, protegidas por Row Level Security do lado do Supabase,
-não por segredo). **Nenhuma chave privada/service-role deveria estar no
-código** — se você encontrar uma, é bug.
+não por segredo — ver seção "Row Level Security" mais abaixo pra saber
+exatamente o que está configurado e por quê). **Nenhuma chave privada/
+service-role deveria estar no código** — se você encontrar uma, é bug.
 
 `STATE` (uma variável global em memória) é a fonte de verdade enquanto o app
 roda. Não há `localStorage`. Ao abrir a página, o app faz um "pull" completo
@@ -82,13 +83,21 @@ motivo concreto (bug real encontrado e corrigido):
    cadastro sobrescreveria o outro ao sincronizar.
 
 5. **Segredos (senha de admin, código de acesso de Equipe) são guardados
-   com hash salgado (`hashSenhaAdmin`/`gerarSaltSenha`), nunca em texto
-   puro** — como os dados sincronizam abertamente (até pra visitantes sem
-   login, já que Painel/Edital são públicos), qualquer campo em texto puro
-   fica visível a quem abrir o DevTools do navegador. O código de acesso de
-   Equipe tem 10 caracteres (não 6) especificamente pra resistir a força
-   bruta offline, já que o hash usado (SHA-256 simples) não tem
-   key-stretching.
+   com hash salgado, nunca em texto puro** — como os dados sincronizam
+   abertamente (até pra visitantes sem login, já que Painel/Edital são
+   públicos), qualquer campo em texto puro fica visível a quem abrir o
+   DevTools do navegador. O código de acesso de Equipe tem 10 caracteres
+   (não 6) especificamente pra resistir a força bruta offline. O hash usa
+   PBKDF2-HMAC-SHA256 (600.000 iterações, ver `PBKDF2_ITERACOES`) — hashes
+   gerados antes dessa mudança (SHA-256 simples, sem key-stretching) ainda
+   são aceitos por compatibilidade (`hashSenhaAdmin`) e migrados sozinhos,
+   sem fricção, no próximo login bem-sucedido (`verificarSegredoComHash`).
+   Mesmo assim, a verificação inteira roda no navegador de quem tenta
+   entrar (não há Supabase Auth) — dá pra ler hash+salt do STATE
+   sincronizado e tentar força bruta offline sem limite de tentativas.
+   PBKDF2 encarece esse ataque, mas não fecha o vetor; resolver de vez
+   exigiria Supabase Auth + RLS de verdade (autenticado vs. anônimo), que
+   é uma mudança de arquitetura maior, ainda não feita.
 
 6. **Todo texto vindo de input do usuário que vai pra `innerHTML` passa por
    `escPdf()`** (a despeito do nome, é a função de escape de HTML geral do
@@ -121,6 +130,62 @@ motivo concreto (bug real encontrado e corrigido):
   cadastra/edita/remove inscritos da própria Equipe, com foto e
   escaneamento de QR Code pra localizar rapidamente alguém já cadastrado.
   Nunca junto com `isAdmin` ao mesmo tempo.
+
+## Row Level Security (Supabase) — configurado FORA do código, leia isto
+
+Esta seção documenta algo que **não existe em nenhum arquivo do
+repositório** — só no painel do Supabase (Authentication → Policies, e
+Storage → Policies). Se você só ler o código, não vai ver nada disso; é
+fácil esquecer que essa camada existe, e foi exatamente o que aconteceu
+até uma auditoria de segurança (sessão de 31/ago/2026) encontrar a tabela
+`jim_sync` com uma única política "ALL" liberando `SELECT`/`INSERT`/
+`UPDATE`/**`DELETE`** pra qualquer um com a anon key (que é pública, está
+embutida no `index.html`) — ou seja, até então, qualquer pessoa conseguia
+apagar o torneio inteiro via API REST direta, sem nunca passar pelo app
+nem pela senha de admin.
+
+**Estado atual (corrigido nessa auditoria):**
+
+- Tabela `jim_sync`: três políticas separadas, `SELECT`/`INSERT`/`UPDATE`
+  abertas pra `public`, **sem nenhuma política de `DELETE`** — com RLS
+  habilitado e sem política permitindo, o Postgres bloqueia por padrão.
+- Bucket de Storage `jim2026-imagens`: mesma ideia — `SELECT`/`INSERT`/
+  `UPDATE` abertas pra `public`, **sem `DELETE`**.
+
+**Por que só falta `DELETE`, e por que isso não quebra nada**: o app
+nunca emite um `DELETE` de verdade — uma remoção (de Equipe, inscrito,
+jogo etc.) sempre vira um `UPDATE` marcando `deletado:true` dentro do
+JSON da linha (uma "lápide"), nunca uma linha apagada de fato (ver
+`syncConstruirLinha`/`syncAplicarLinha`). Bloquear `DELETE` no Supabase
+não tira nenhuma funcionalidade do app — só impede o ataque mais
+destrutivo possível (apagar tudo de uma vez por fora do app).
+
+**Por que não dá pra restringir mais que isso (limite de arquitetura,
+não falta de cuidado)**: não existe Supabase Auth aqui — visitante, admin
+e representante de Equipe usam a MESMA anon key. Do ponto de vista do
+banco, uma escrita do navegador do admin de verdade e uma escrita de um
+script malicioso são indistinguíveis (mesma `role: anon`). Por isso
+`SELECT`/`INSERT`/`UPDATE` precisam continuar abertos pra `public` — não
+tem como restringir sem quebrar o app pra todo mundo, admin incluído. A
+única forma de restringir de verdade seria Supabase Auth (login gerenciado
+pelo próprio Supabase, com JWT que a RLS consegue diferenciar de
+`anon`) — discutido como possível próximo passo, ainda não implementado.
+
+**Se você (humano ou Claude) for mexer nisso de novo**: o SQL usado pra
+chegar nesse estado (rodado manualmente no SQL Editor do Supabase, não
+está automatizado em lugar nenhum):
+
+```sql
+-- jim_sync: troca a política única "ALL" por três específicas, sem DELETE
+DROP POLICY "anon full access" ON public.jim_sync;
+CREATE POLICY "leitura publica" ON public.jim_sync FOR SELECT TO public USING (true);
+CREATE POLICY "insercao publica" ON public.jim_sync FOR INSERT TO public WITH CHECK (true);
+CREATE POLICY "atualizacao publica" ON public.jim_sync FOR UPDATE TO public USING (true) WITH CHECK (true);
+```
+
+No bucket `jim2026-imagens`, a política de `DELETE` (`jim2026 imagens
+delecao anon`) foi removida direto pela interface (Storage → Policies →
+bucket → ⋮ → Delete policy), sem SQL.
 
 ## Metodologia de trabalho usada (recomendado manter)
 
@@ -165,6 +230,15 @@ Todo o desenvolvimento seguiu este ciclo, e vale continuar:
   pendentes na última passada.
 - **Referência órfã / corrida de sincronização**: varredura sistemática por
   todo o arquivo, sem achados pendentes na última passada.
+- **Row Level Security (Supabase)**: auditado e corrigido (31/ago/2026) —
+  ver seção dedicada acima. `DELETE` bloqueado em `jim_sync` e no bucket
+  `jim2026-imagens`; `SELECT`/`INSERT`/`UPDATE` seguem abertos por
+  necessidade de arquitetura (sem Supabase Auth). Não precisa reauditar a
+  menos que alguém mexa nas políticas direto no painel do Supabase.
+- **Hash de senha/código de acesso**: migrado de SHA-256 simples pra
+  PBKDF2 (600k iterações), com upgrade automático de hashes antigos no
+  próximo login. Limite aceito e documentado: verificação ainda roda no
+  navegador de quem tenta entrar (ver ponto 5 da seção de sincronização).
 
 ## O que precisa ser configurado numa conta/ambiente novo
 
