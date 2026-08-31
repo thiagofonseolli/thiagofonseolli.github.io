@@ -2085,6 +2085,7 @@ function ensureDefaults(s){
   }
   delete s.espacos; // funcionalidade "Espaços de Disputa" / aba Tabela removida
   if(typeof s.editalHtml !== 'string' || !s.editalHtml) s.editalHtml = getDefaultEditalHtml();
+  else s.editalHtml = sanitizeEditalHtml(s.editalHtml); // um backup externo pode trazer HTML malicioso -- nunca confia sem sanitizar (ver sanitizeEditalHtml)
   // Migração: remove as variáveis "segmento" (grupo) e "série" das equipes e dos jogos —
   // a competição passa a ser disputada por todas as equipes entre si, sem essa divisão.
   s.teams.forEach(t=>{ delete t.grupo; delete t.serie; });
@@ -2763,7 +2764,7 @@ function syncAplicarLinha(linha){
     else if(registro_id==='regras') STATE.regras = dados;
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
-    else if(registro_id==='editalHtml') STATE.editalHtml = dados;
+    else if(registro_id==='editalHtml') STATE.editalHtml = sanitizeEditalHtml(dados);
     else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null; }
     return;
   }
@@ -7817,6 +7818,59 @@ function showConfirm(message, onConfirm, onCancel){
 
 function escPdf(str){
   return String(str==null?'':str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+/* ===================== SANITIZAÇÃO DO HTML DO EDITAL =====================
+   STATE.editalHtml é o ÚNICO campo do app que vira HTML de verdade (via innerHTML) sem
+   passar por escPdf() na exibição — precisa suportar formatação rica (parágrafos, listas,
+   tabelas, imagens do documento original). O editor do app (editalPlainTextToHtml) só
+   aceita texto simples e converte pra HTML seguro, escapando cada linha — isso protege bem
+   quem edita PELO APP.
+
+   O que isso não protege: STATE.editalHtml sincroniza abertamente, e — como a auditoria de
+   RLS documentou no PROJETO.md — UPDATE na tabela precisa continuar aberto pra qualquer um
+   com a anon key (limite de arquitetura, não dá pra evitar sem Supabase Auth). Alguém pode
+   escrever um editalHtml malicioso DIRETO na API do Supabase, contornando completamente o
+   app e o editalPlainTextToHtml() — e esse HTML então vira DOM de verdade (via innerHTML)
+   pra QUALQUER visitante do Edital (público, nem precisa login). Um <img src=x
+   onerror=...>, por exemplo, dispara mesmo num elemento nunca anexado à página visível, só
+   por ser interpretado como DOM (é assim que parseEditalTopics() lê o conteúdo).
+
+   sanitizeEditalHtml() é a segunda camada: aplicada no momento em que o valor ENTRA em
+   STATE vindo de fora do app (sync pull em syncAplicarLinha, e import de backup em
+   ensureDefaults) — nunca confia que o texto foi gerado com segurança, sempre neutraliza
+   antes de guardar. Usa DOMParser (não executa <script> nem dispara handlers durante o
+   parse em si) e remove por completo qualquer tag fora do allowlist abaixo (junto com o
+   conteúdo dela) e qualquer atributo fora do allowlist da tag que sobrar — inclusive todo
+   atributo "on*", e em "src"/"href" qualquer esquema que não seja "data:image/" (bloqueia
+   "javascript:" e carregamento de imagem remota, que poderia vazar dado por URL). */
+const EDITAL_TAGS_PERMITIDAS = {
+  P:[], STRONG:[], EM:[], U:[], BR:[], SPAN:['style'],
+  UL:[], OL:['type'], LI:[],
+  TABLE:['style'], THEAD:[], TBODY:[], TR:['style'], TD:['style','colspan','rowspan'], TH:['style','colspan','rowspan'],
+  COLGROUP:[], COL:['style'],
+  BLOCKQUOTE:[], IMG:['src','alt','style'], DIV:['style'], DETAILS:[], SUMMARY:[]
+};
+function sanitizeEditalHtml(html){
+  if(typeof html !== 'string' || !html) return '';
+  let doc;
+  try{ doc = new DOMParser().parseFromString(html, 'text/html'); }catch(e){ return ''; }
+  const paraRemover = [];
+  function limpar(no){
+    if(no.nodeType === Node.COMMENT_NODE){ paraRemover.push(no); return; }
+    if(no.nodeType !== Node.ELEMENT_NODE) return; // nó de texto: nada a limpar
+    const permitidos = EDITAL_TAGS_PERMITIDAS[no.tagName];
+    if(permitidos === undefined){ paraRemover.push(no); return; } // tag fora do allowlist -- some junto com o conteúdo, nunca só "desembrulhada"
+    Array.from(no.attributes).forEach(attr=>{
+      const nome = attr.name.toLowerCase();
+      if(nome.indexOf('on')===0 || !permitidos.includes(nome)){ no.removeAttribute(attr.name); return; }
+      if((nome==='src' || nome==='href') && !/^data:image\//i.test(attr.value)){ no.removeAttribute(attr.name); return; }
+      if(nome==='style' && /url\s*\(|expression\s*\(|javascript:/i.test(attr.value)){ no.removeAttribute(attr.name); return; }
+    });
+    Array.from(no.childNodes).forEach(limpar);
+  }
+  Array.from(doc.body.childNodes).forEach(limpar);
+  paraRemover.forEach(no=> no.remove());
+  return doc.body.innerHTML;
 }
 function pdfTeamChip(teamId, genero){
   const bg = teamColor(teamId, genero);
