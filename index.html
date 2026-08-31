@@ -1644,6 +1644,8 @@ function defaultState(){
     header: defaultHeader(),
     adminPasswordSalt: null,
     adminPasswordHash: null,
+    adminPasswordAlgo: null, // 'pbkdf2' quando já migrado (ver PBKDF2_ITERACOES) -- null/ausente = formato legado (SHA-256 simples, hashSenhaAdmin)
+    adminPasswordIter: null,
     teams, modalidades,
     games: buildAllGames(teams, modalidades),
     individual: {}, desfile: {}, ajustes: {}, inscritos: [],
@@ -1934,6 +1936,8 @@ function ensureDefaults(s){
   delete s.adminPassword;
   if(typeof s.adminPasswordSalt !== 'string') s.adminPasswordSalt = null;
   if(typeof s.adminPasswordHash !== 'string') s.adminPasswordHash = null;
+  if(s.adminPasswordAlgo !== 'pbkdf2') s.adminPasswordAlgo = null; // formato legado por padrão -- migra sozinho no próximo login bem-sucedido (ver verificarSenhaAdmin)
+  if(typeof s.adminPasswordIter !== 'number') s.adminPasswordIter = null;
   if(!s.header) s.header = defaultHeader();
   if(s.header.eyebrow==null) s.header.eyebrow = defaultHeader().eyebrow;
   if(s.header.subtitle==null) s.header.subtitle = defaultHeader().subtitle;
@@ -2181,12 +2185,20 @@ async function definirCodigoAcessoEquipe(team){
     colide = false;
     for(const outraEquipe of STATE.teams){
       if(outraEquipe===team || !outraEquipe.codigoAcessoHash || !outraEquipe.codigoAcessoSalt) continue;
-      const hashCandidato = await hashSenhaAdmin(codigoPlano, outraEquipe.codigoAcessoSalt);
+      // Confere contra o formato de hash que aquela Equipe TEM hoje (pode ser o legado
+      // SHA-256 simples ou o novo PBKDF2, ver PBKDF2_ITERACOES) -- os dois convivem até
+      // toda Equipe antiga ser migrada (automaticamente, no próximo login com sucesso).
+      const hashCandidato = outraEquipe.codigoAcessoAlgo==='pbkdf2'
+        ? await hashPBKDF2(codigoPlano, outraEquipe.codigoAcessoSalt, outraEquipe.codigoAcessoIter||PBKDF2_ITERACOES)
+        : await hashSenhaAdmin(codigoPlano, outraEquipe.codigoAcessoSalt);
       if(hashCandidato===outraEquipe.codigoAcessoHash){ colide = true; break; }
     }
   } while(colide);
-  team.codigoAcessoSalt = gerarSaltSenha();
-  team.codigoAcessoHash = await hashSenhaAdmin(codigoPlano, team.codigoAcessoSalt);
+  const {hash, salt, algo, iter} = await gerarHashSegredo(codigoPlano); // sempre gera um código NOVO já no formato PBKDF2
+  team.codigoAcessoHash = hash;
+  team.codigoAcessoSalt = salt;
+  team.codigoAcessoAlgo = algo;
+  team.codigoAcessoIter = iter;
   delete team.codigoAcesso; // limpa qualquer resquício de um código antigo em texto puro (ver migrarCodigosAcessoLegados)
   markDirty();
   return codigoPlano;
@@ -2209,12 +2221,13 @@ async function migrarCodigosAcessoLegados(){
   for(const teamId of idsParaMigrar){
     const team = STATE.teams.find(t=> t.id===teamId);
     if(!team || !team.codigoAcesso || team.codigoAcessoHash) continue; // já migrado ou removido nesse meio-tempo
-    const salt = gerarSaltSenha();
-    const hash = await hashSenhaAdmin(String(team.codigoAcesso).toUpperCase(), salt);
+    const {hash, salt, algo, iter} = await gerarHashSegredo(String(team.codigoAcesso).toUpperCase()); // já migra direto pro formato PBKDF2 (ver PBKDF2_ITERACOES) -- sabemos o texto puro aqui, então não há razão pra passar pelo formato legado primeiro
     const teamAtual = STATE.teams.find(t=> t.id===teamId); // busca de novo: o objeto pode ter sido substituído durante o await acima
     if(!teamAtual || !teamAtual.codigoAcesso || teamAtual.codigoAcessoHash) continue;
     teamAtual.codigoAcessoSalt = salt;
     teamAtual.codigoAcessoHash = hash;
+    teamAtual.codigoAcessoAlgo = algo;
+    teamAtual.codigoAcessoIter = iter;
     delete teamAtual.codigoAcesso;
     mudou = true;
   }
@@ -2333,17 +2346,32 @@ async function saveState(){
     return false;
   }
 }
-/* ===================== SENHA DE ADMINISTRADOR (HASH) =====================
-   A senha não fica guardada em texto puro em lugar nenhum — só um hash (SHA-256, com um
-   "sal" aleatório gerado uma vez por instalação) é enviado à nuvem, como parte da config
-   sincronizada (ver adminAuth em SYNC_CONFIG_CHAVES), para que o mesmo login funcione em
-   qualquer dispositivo. Importante ser honesto sobre o que isso resolve e o que não
-   resolve: isso NÃO é segurança de verdade — como a verificação roda no navegador da
-   própria pessoa, dá para tentar quebrar o hash por força bruta, sem limite de
-   tentativas, ou simplesmente ler `isAdmin` e sobrescrevê-lo no console. O que isso
-   resolve é o problema mais básico de hoje: a senha não fica literalmente legível
-   abrindo o DevTools ou um arquivo de backup exportado — que é o cenário mais provável
-   (um aluno curioso), não um ataque sério. */
+/* ===================== SENHA DE ADMINISTRADOR / CÓDIGO DE ACESSO DE EQUIPE (HASH) =====================
+   Nenhum dos dois fica guardado em texto puro em lugar nenhum — só um hash (com um "sal"
+   aleatório por segredo) é enviado à nuvem (ver adminAuth em SYNC_CONFIG_CHAVES, e
+   codigoAcessoHash em cada Equipe), para que o mesmo login funcione em qualquer
+   dispositivo. Importante ser honesto sobre o que isso resolve e o que não resolve: isso
+   NÃO é segurança de verdade — como a verificação roda no navegador da própria pessoa
+   tentando entrar, dá pra ler o hash+salt direto do STATE sincronizado (público, mesmo
+   pra quem não fez login) e tentar quebrar por força bruta OFFLINE, sem limite de
+   tentativas nem rate limiting -- ou simplesmente ler/sobrescrever `isAdmin` no console,
+   sem precisar quebrar hash nenhum. O que isso resolve é o problema mais básico: a senha
+   não fica literalmente legível abrindo o DevTools ou um backup exportado.
+
+   PBKDF2 (em vez do SHA-256 de uma passada só usado antes) não resolve esse problema de
+   fundo (a verificação continua rodando no navegador de quem tenta entrar) -- mas torna
+   a força bruta OFFLINE centenas de milhares de vezes mais lenta, já que SHA-256 simples
+   é rápido demais de calcular em massa (é feito PRA SER rápido, o oposto do que se quer
+   aqui). PBKDF2_ITERACOES segue a recomendação atual da OWASP pra PBKDF2-HMAC-SHA256.
+
+   Hashes gerados ANTES desta mudança continuam no formato legado (sem `algo`/`iter`
+   salvos) -- não dá pra "reconverter" um hash existente sem saber o texto original. Em
+   vez de forçar todo mundo a trocar a senha/código, verificarSegredoComHash() aceita os
+   dois formatos, e quem já tem hash legado é migrado automaticamente, sem fricção
+   nenhuma, na primeira vez que loga com sucesso depois desta mudança (ver
+   verificarSenhaAdmin/attemptLoginCodigoEquipe) -- a pessoa só precisa continuar
+   digitando a MESMA senha/código de sempre. */
+const PBKDF2_ITERACOES = 600000;
 async function sha256Hex(texto){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
@@ -2353,16 +2381,66 @@ function gerarSaltSenha(){
   crypto.getRandomValues(arr);
   return Array.from(arr).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+/* Formato LEGADO (mantida só pra continuar verificando hashes gerados antes desta
+   mudança -- nunca mais usada pra GERAR um hash novo, ver gerarHashSegredo). */
 async function hashSenhaAdmin(senha, salt){
   return sha256Hex(salt + ':' + senha);
 }
+/* Formato NOVO. PBKDF2-HMAC-SHA256 via Web Crypto (nativo do navegador, sem biblioteca
+   externa) -- deliberadamente lento (ver PBKDF2_ITERACOES), ao contrário de um hash
+   simples, que é rápido de propósito. */
+async function hashPBKDF2(segredo, salt, iteracoes){
+  const enc = new TextEncoder();
+  const chaveBase = await crypto.subtle.importKey('raw', enc.encode(segredo), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:enc.encode(salt), iterations:iteracoes}, chaveBase, 256);
+  return Array.from(new Uint8Array(bits)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+/* Gera um {hash, salt, algo, iter} pra um segredo NOVO (sempre no formato PBKDF2, nunca
+   no legado) -- usar ao DEFINIR uma senha/código, nunca pra verificar um já existente
+   (que pode estar em qualquer um dos dois formatos, ver verificarSegredoComHash). */
+async function gerarHashSegredo(segredo){
+  const salt = gerarSaltSenha();
+  const hash = await hashPBKDF2(segredo, salt, PBKDF2_ITERACOES);
+  return {hash, salt, algo:'pbkdf2', iter: PBKDF2_ITERACOES};
+}
+/* Verifica um segredo digitado contra um registro salvo {hash, salt, algo, iter},
+   suportando tanto o formato novo (algo==='pbkdf2') quanto o legado (algo ausente/null).
+   `upgrade` só vem preenchido quando a verificação bateu no formato LEGADO -- quem
+   chama decide onde gravar esse novo {hash,salt,algo,iter} (nunca escreve aqui dentro,
+   pra não presumir onde o registro mora em STATE). */
+async function verificarSegredoComHash(segredoDigitado, registro){
+  if(!registro || !registro.hash || !registro.salt) return {ok:false, upgrade:null};
+  if(registro.algo==='pbkdf2'){
+    const calculado = await hashPBKDF2(segredoDigitado, registro.salt, registro.iter || PBKDF2_ITERACOES);
+    return {ok: calculado===registro.hash, upgrade:null};
+  }
+  const calculadoLegado = await hashSenhaAdmin(segredoDigitado, registro.salt);
+  const ok = calculadoLegado===registro.hash;
+  return {ok, upgrade: ok ? await gerarHashSegredo(segredoDigitado) : null};
+}
 async function verificarSenhaAdmin(senhaDigitada){
-  if(!STATE.adminPasswordHash || !STATE.adminPasswordSalt) return false;
-  return (await hashSenhaAdmin(senhaDigitada, STATE.adminPasswordSalt)) === STATE.adminPasswordHash;
+  const resultado = await verificarSegredoComHash(senhaDigitada, {
+    hash: STATE.adminPasswordHash, salt: STATE.adminPasswordSalt,
+    algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter
+  });
+  if(resultado.ok && resultado.upgrade){
+    // Login certo, mas hash ainda no formato legado -- já que a pessoa acabou de provar
+    // que sabe a senha, aproveita pra trocar silenciosamente pro formato mais forte, sem
+    // exigir troca de senha nenhuma.
+    STATE.adminPasswordHash = resultado.upgrade.hash;
+    STATE.adminPasswordSalt = resultado.upgrade.salt;
+    STATE.adminPasswordAlgo = resultado.upgrade.algo;
+    STATE.adminPasswordIter = resultado.upgrade.iter;
+    markDirty();
+  }
+  return resultado.ok;
 }
 async function definirSenhaAdmin(novaSenha){
-  if(!STATE.adminPasswordSalt) STATE.adminPasswordSalt = gerarSaltSenha();
-  STATE.adminPasswordHash = await hashSenhaAdmin(novaSenha, STATE.adminPasswordSalt);
+  const {hash, salt, algo, iter} = await gerarHashSegredo(novaSenha);
+  STATE.adminPasswordHash = hash;
+  STATE.adminPasswordSalt = salt;
+  STATE.adminPasswordAlgo = algo;
+  STATE.adminPasswordIter = iter;
 }
 /* Chamada uma vez, na inicialização (e após importar um backup): garante que STATE sempre
    tenha um hash válido. Cobre dois casos — (1) uma instalação nova, que nunca teve senha
@@ -2565,7 +2643,7 @@ function syncConstruirLinha(tabela, registroId){
       tabOrder: STATE.tabOrder,
       crachaConfig: STATE.crachaConfig,
       editalHtml: STATE.editalHtml,
-      adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash},
+      adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash, algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter},
     };
     return {...base, dados: valores[registroId], deletado:false};
   }
@@ -2686,7 +2764,7 @@ function syncAplicarLinha(linha){
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = dados;
-    else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; }
+    else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null; }
     return;
   }
 }
@@ -3183,17 +3261,38 @@ async function attemptLogin(){
    nesse modo. */
 async function attemptLoginCodigoEquipe(){
   const val = document.getElementById('loginCodigoEquipe').value.trim().toUpperCase();
-  let teamEncontrado = null;
+  let teamEncontradoId = null;
   if(val){
     for(const team of STATE.teams){
       if(!team.codigoAcessoHash || !team.codigoAcessoSalt) continue;
-      const hashDigitado = await hashSenhaAdmin(val, team.codigoAcessoSalt);
-      if(hashDigitado === team.codigoAcessoHash){ teamEncontrado = team; break; }
+      const resultado = await verificarSegredoComHash(val, {
+        hash: team.codigoAcessoHash, salt: team.codigoAcessoSalt,
+        algo: team.codigoAcessoAlgo, iter: team.codigoAcessoIter
+      });
+      if(resultado.ok){
+        teamEncontradoId = team.id;
+        if(resultado.upgrade){
+          // Código certo, mas hash ainda no formato legado -- busca a Equipe de novo por
+          // ID (nunca escreve na referência `team` capturada antes do await acima, ver
+          // regra 1 do PROJETO.md) e só aplica o upgrade se ainda for o MESMO hash de
+          // quando a verificação rodou (evita pisar numa mudança concorrente, ex.: um
+          // código novo gerado nesse meio-tempo).
+          const teamAtual = STATE.teams.find(t=> t.id===team.id);
+          if(teamAtual && teamAtual.codigoAcessoHash===team.codigoAcessoHash){
+            teamAtual.codigoAcessoHash = resultado.upgrade.hash;
+            teamAtual.codigoAcessoSalt = resultado.upgrade.salt;
+            teamAtual.codigoAcessoAlgo = resultado.upgrade.algo;
+            teamAtual.codigoAcessoIter = resultado.upgrade.iter;
+            markDirty();
+          }
+        }
+        break;
+      }
     }
   }
-  if(teamEncontrado){
-    accessoEquipeId = teamEncontrado.id;
-    try{ sessionStorage.setItem(TEAM_ACCESS_SESSION_KEY, teamEncontrado.id); }catch(e){}
+  if(teamEncontradoId){
+    accessoEquipeId = teamEncontradoId;
+    try{ sessionStorage.setItem(TEAM_ACCESS_SESSION_KEY, teamEncontradoId); }catch(e){}
     closeLoginModal();
     renderAll();
   } else {
