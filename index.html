@@ -8802,8 +8802,13 @@ function renderAll(){
   if(accessoEquipeId){ renderAcessoEquipeView(); updateSaveStatus(); return; }
   const btnAdminEl = document.getElementById('btnAdmin');
   if(btnAdminEl) btnAdminEl.style.display = ''; // desfaz o "esconder" do modo de acesso restrito, se vinha de lá
+  // "⋯ Mais opções" é exclusivo de admin — mesmo com "📊 Painel Geral" sendo o único
+  // item não-administrativo dentro dele, o menu inteiro fica oculto pra quem não é
+  // admin (decisão explícita: antes só os botões admin dentro do menu ficavam
+  // escondidos individualmente, deixando o botão "⋯ Mais opções" visível pra qualquer
+  // visitante com um único item dentro).
   const moreOptionsEl = document.getElementById('moreOptionsWrap');
-  if(moreOptionsEl) moreOptionsEl.style.display = '';
+  if(moreOptionsEl) moreOptionsEl.style.display = isAdmin ? '' : 'none';
   if(!isAdmin && activeTab!=='painel' && activeTab!=='edital') activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
   renderTabs();
   renderScoreboard();
