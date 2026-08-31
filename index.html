@@ -194,6 +194,7 @@
   <div class="topbar-inner">
     <div class="toolbar">
       <span class="save-status" id="saveStatus">Carregando…</span>
+      <button id="btnImagensPendentes" style="display:none;" title="Fotos/logos que falharam ao enviar para a nuvem -- clique para ver quais e reenviar">⚠ Imagens não sincronizadas</button>
       <button class="primary" id="btnSave">💾 Salvar</button>
       <button id="btnAdmin">🔒 Login Administrador</button>
       <div class="dropdown-wrap" id="moreOptionsWrap">
@@ -1658,7 +1659,13 @@ function defaultState(){
     tabOrder: TABS.map(t=>t.id),
     crachaLogos: {logo1:null, logo2:null},
     crachaConfig: defaultCrachaConfig(),
-    editalHtml: getDefaultEditalHtml()
+    editalHtml: getDefaultEditalHtml(),
+    // Referências de imagem (foto de inscrito, logo) cujo upload pro Supabase Storage
+    // ainda não foi confirmado com sucesso — sincronizado entre dispositivos (ver
+    // SYNC_TABELAS_ESPECIAIS) só pra TORNAR VISÍVEL o problema em qualquer tela de
+    // admin, não pra reenviar de outro dispositivo (só quem tentou o upload tem os
+    // bytes da imagem em memória). Ver comentário em cima de PENDING_IMG_SESSION_KEY.
+    imagensPendentesUpload: {}
   };
 }
 
@@ -2099,6 +2106,7 @@ function ensureDefaults(s){
     if(t.aglutinadorId==null) t.aglutinadorId = null;
     else if(!aglutinadorIds.has(t.aglutinadorId)) t.aglutinadorId = null;
   });
+  if(!s.imagensPendentesUpload || typeof s.imagensPendentesUpload !== 'object') s.imagensPendentesUpload = {};
   return s;
 }
 
@@ -2484,7 +2492,7 @@ const SYNC_COLECOES = {
 };
 // Nomes de tabela que não são uma lista simples (formatos especiais, tratados à parte
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
-const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','inscrito_foto','config'];
+const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
 const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth'];
 
@@ -2507,6 +2515,7 @@ function syncListarIdsAtuais(tabela){
   if(tabela==='sumula_obs') return Object.keys(STATE.sumulas);
   if(tabela==='inscrito_foto') return STATE.inscritos.map(a=>String(a.id));
   if(tabela==='config') return SYNC_CONFIG_CHAVES;
+  if(tabela==='imagensPendentesUpload') return Object.keys(STATE.imagensPendentesUpload);
   return [];
 }
 /* Monta a linha pronta pra enviar (ou compara, na detecção de mudanças) com o estado
@@ -2538,6 +2547,10 @@ function syncConstruirLinha(tabela, registroId){
     const a = STATE.inscritos.find(x=> String(x.id)===String(registroId));
     const foto = a ? a.foto : '';
     return {...base, dados: foto || null, deletado: !foto};
+  }
+  if(tabela==='imagensPendentesUpload'){
+    const existe = Object.prototype.hasOwnProperty.call(STATE.imagensPendentesUpload, registroId);
+    return {...base, dados: existe ? STATE.imagensPendentesUpload[registroId] : null, deletado: !existe};
   }
   if(tabela==='config'){
     const valores = {
@@ -2638,6 +2651,12 @@ function syncAplicarLinha(linha){
     if(syncTemEdicaoLocalPendente('inscrito_foto', registro_id)) return;
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
     if(a){ a.foto = deletado ? '' : (dados||''); if(a.foto) syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(a.foto)); }
+    return;
+  }
+  if(tabela==='imagensPendentesUpload'){
+    if(syncTemEdicaoLocalPendente('imagensPendentesUpload', registro_id)) return;
+    if(deletado) delete STATE.imagensPendentesUpload[registro_id];
+    else if(dados!=null) STATE.imagensPendentesUpload[registro_id] = dados;
     return;
   }
   if(tabela==='config'){
@@ -2854,10 +2873,16 @@ function syncStorageUrl(ref){ return `${SUPABASE_URL}/storage/v1/object/public/$
    sessionStorage desta aba — mesmo padrão já usado para a sessão de login (ver
    ADMIN_SESSION_KEY/TEAM_ACCESS_SESSION_KEY). Isso cobre o caso mais comum (recarregar
    a mesma aba após uma falha de rede): ao reabrir, restaurarImagensPendentesEnvio() (ver
-   init()) repõe a fila e tenta de novo automaticamente. NÃO cobre fechar a aba de vez
-   sem nunca mais voltar nela — nesse caso, como só esse dispositivo tinha a imagem, não
-   há como recuperar; a referência fica quebrada e precisa de um novo upload manual (a
-   foto/logo continua podendo ser trocada normalmente pela interface). */
+   init()) repõe a fila e tenta de novo automaticamente.
+
+   Pra fechar a aba de vez sem nunca mais voltar nela, uma tentativa de reenvio
+   automático de outro dispositivo não é possível (só quem tentou o upload tem os bytes
+   da imagem em memória) — mas o PROBLEMA em si agora é visível em QUALQUER dispositivo:
+   toda falha confirmada marca a referência em STATE.imagensPendentesUpload, que
+   sincroniza normalmente (ver SYNC_TABELAS_ESPECIAIS) e aparece como aviso pro admin em
+   qualquer tela (ver painel "⚠ Imagens não sincronizadas", renderAvisoImagensPendentes).
+   A correção nesse caso é manual: o admin troca/reenvia aquela foto ou logo pela
+   interface normal — ao dar certo, a marca é removida automaticamente. */
 const PENDING_IMG_SESSION_KEY = 'jim2026-imagens-pendentes-envio';
 const syncImagensPendentesEnvio = new Set();
 function persistirImagensPendentesEnvio(){
@@ -2895,7 +2920,22 @@ async function syncEnviarImagemComRetry(ref, dataUrl){
   syncImagensPendentesEnvio.add(ref);
   persistirImagensPendentesEnvio();
   const ok = await syncEnviarImagem(ref, dataUrl);
-  if(ok) syncImagensPendentesEnvio.delete(ref);
+  if(ok){
+    syncImagensPendentesEnvio.delete(ref);
+    // Se um envio anterior já tinha sido marcado como falho pra outros dispositivos
+    // verem (ver bloco abaixo), remove a marca agora que finalmente deu certo.
+    if(STATE.imagensPendentesUpload[ref]){ delete STATE.imagensPendentesUpload[ref]; markDirty(); }
+  } else {
+    // Só torna VISÍVEL PRA OUTROS DISPOSITIVOS depois de uma falha de verdade -- não já
+    // na primeira tentativa otimista acima, pra não gerar ruído de sincronização a cada
+    // upload comum (a grande maioria dá certo de primeira). Isso é só pra AVISAR -- outro
+    // dispositivo não consegue reenviar sozinho (não tem os bytes da imagem); a correção
+    // de verdade é o admin trocar/reenviar aquela foto/logo pela interface normal.
+    if(!STATE.imagensPendentesUpload[ref]){
+      STATE.imagensPendentesUpload[ref] = {desde: new Date().toISOString(), dispositivo: syncDeviceId};
+      markDirty();
+    }
+  }
   persistirImagensPendentesEnvio();
 }
 /* Tenta reenviar, a cada ciclo de sincronização, qualquer imagem cujo envio tenha
@@ -3450,6 +3490,45 @@ function renderHeaderBlock(){
   // "morto" e confuso na tela de quem não tem nenhum tipo de acesso editável.
   const saveBtn = document.getElementById('btnSave');
   if(saveBtn) saveBtn.style.display = (isAdmin || accessoEquipeId) ? 'inline-block' : 'none';
+  renderAvisoImagensPendentes();
+}
+/* Descreve uma referência de imagem (ex.: "foto_42", "header_logo") de forma legível pro
+   admin, sem expor o identificador técnico cru. */
+function descricaoImagemPendente(ref){
+  if(ref==='header_logo') return 'Logo do cabeçalho';
+  if(ref==='header_bg') return 'Imagem de fundo do cabeçalho';
+  if(ref==='cracha_logo1') return 'Logo 1 do crachá';
+  if(ref==='cracha_logo2') return 'Logo 2 do crachá';
+  const m = /^foto_(.+)$/.exec(ref);
+  if(m){
+    const a = STATE.inscritos.find(x=> String(x.id)===m[1]);
+    return a ? `Foto de ${a.nome}` : `Foto de um inscrito já removido (${ref})`;
+  }
+  return ref;
+}
+/* Botão de aviso, visível só pro admin (mesma regra de qualquer outro controle
+   exclusivo -- ver renderHeaderBlock): mostra quantas imagens têm envio não confirmado
+   (ver STATE.imagensPendentesUpload, sincronizado entre dispositivos só pra tornar o
+   problema visível -- ver comentário em cima de PENDING_IMG_SESSION_KEY). Ao clicar,
+   lista quais são e desde quando, pra o admin saber que precisa reenviar aquela
+   foto/logo manualmente. */
+function renderAvisoImagensPendentes(){
+  const btn = document.getElementById('btnImagensPendentes');
+  if(!btn) return;
+  const refs = isAdmin ? Object.keys(STATE.imagensPendentesUpload||{}) : [];
+  if(refs.length===0){ btn.style.display = 'none'; return; }
+  btn.style.display = 'inline-block';
+  btn.textContent = `⚠ ${refs.length} imagem${refs.length>1?'s':''} não sincronizada${refs.length>1?'s':''}`;
+}
+function abrirAvisoImagensPendentes(){
+  const refs = Object.keys(STATE.imagensPendentesUpload||{});
+  if(refs.length===0) return;
+  const linhas = refs.map(ref=>{
+    const info = STATE.imagensPendentesUpload[ref];
+    const quando = info && info.desde ? new Date(info.desde).toLocaleString('pt-BR') : '';
+    return `• ${descricaoImagemPendente(ref)}${quando ? ' (desde '+quando+')' : ''}`;
+  });
+  showAlert('As imagens abaixo não foram confirmadas no envio para a nuvem (provável falha de rede) e podem aparecer quebradas para outras pessoas. Reenvie cada uma trocando a foto/logo normalmente pela interface:\n\n' + linhas.join('\n'));
 }
 
 /* Ícone "ℹ️" ao lado do título: alterna um pequeno popover com o texto descritivo do
@@ -9238,6 +9317,7 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('btnImport').addEventListener('click', ()=>{ if(isAdmin) document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change', (e)=>{ if(e.target.files[0] && isAdmin) importBackup(e.target.files[0]); e.target.value=''; });
   document.getElementById('btnPainelPopup').addEventListener('click', openPainelModal);
+  document.getElementById('btnImagensPendentes').addEventListener('click', ()=>{ if(isAdmin) abrirAvisoImagensPendentes(); });
   document.getElementById('closePainelModal').addEventListener('click', closePainelModal);
   document.getElementById('closePainelModal2').addEventListener('click', closePainelModal);
   document.getElementById('painelModal').addEventListener('click', (e)=>{ if(e.target.id==='painelModal') closePainelModal(); });
