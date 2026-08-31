@@ -3379,6 +3379,13 @@ function renderHeaderBlock(){
   if(importBtn) importBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const adminDivider = document.getElementById('adminOnlyDivider');
   if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
+  // "💾 Salvar" só faz algo quando isAdmin ou accessoEquipeId (ver o clique, mais abaixo
+  // no arquivo) — pra um visitante comum (só lendo Painel/Edital, sem login nenhum), é
+  // um botão sem nenhuma função, que não faz nada ao clicar. Diferente do Exportar
+  // backup (corrigido antes), aqui não há exposição de dado nenhuma — só um botão
+  // "morto" e confuso na tela de quem não tem nenhum tipo de acesso editável.
+  const saveBtn = document.getElementById('btnSave');
+  if(saveBtn) saveBtn.style.display = (isAdmin || accessoEquipeId) ? 'inline-block' : 'none';
 }
 
 /* Ícone "ℹ️" ao lado do título: alterna um pequeno popover com o texto descritivo do
