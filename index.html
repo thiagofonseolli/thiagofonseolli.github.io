@@ -2186,16 +2186,29 @@ async function definirCodigoAcessoEquipe(team){
 /* Migração única: converte qualquer código de acesso ainda guardado em texto puro (de
    antes desta correção) para o formato com hash — sem isso, o texto puro continuaria
    exposto pra qualquer visitante até alguém gerar um código novo manualmente. Chamada
-   uma vez, na inicialização (ver init()). */
+   na inicialização (ver init()) E depois de importar um backup (ver importBackup) — um
+   backup antigo pode trazer `codigoAcesso` em texto puro de volta pra STATE, e sem
+   rechamar essa migração ali o auto-save reenviaria esse texto puro pra nuvem sozinho,
+   reintroduzindo a mesma vulnerabilidade já corrigida.
+
+   Busca cada Equipe de novo por ID a cada await (nunca guarda a referência do objeto
+   `team` através de um await) — ver regra 1 do PROJETO.md: uma sincronização
+   concorrente pode SUBSTITUIR o objeto no array enquanto o hash está sendo calculado,
+   e escrever numa referência antiga faria a mudança sumir silenciosamente. */
 async function migrarCodigosAcessoLegados(){
   let mudou = false;
-  for(const team of STATE.teams){
-    if(team.codigoAcesso && !team.codigoAcessoHash){
-      team.codigoAcessoSalt = gerarSaltSenha();
-      team.codigoAcessoHash = await hashSenhaAdmin(String(team.codigoAcesso).toUpperCase(), team.codigoAcessoSalt);
-      delete team.codigoAcesso;
-      mudou = true;
-    }
+  const idsParaMigrar = STATE.teams.filter(t=> t.codigoAcesso && !t.codigoAcessoHash).map(t=> t.id);
+  for(const teamId of idsParaMigrar){
+    const team = STATE.teams.find(t=> t.id===teamId);
+    if(!team || !team.codigoAcesso || team.codigoAcessoHash) continue; // já migrado ou removido nesse meio-tempo
+    const salt = gerarSaltSenha();
+    const hash = await hashSenhaAdmin(String(team.codigoAcesso).toUpperCase(), salt);
+    const teamAtual = STATE.teams.find(t=> t.id===teamId); // busca de novo: o objeto pode ter sido substituído durante o await acima
+    if(!teamAtual || !teamAtual.codigoAcesso || teamAtual.codigoAcessoHash) continue;
+    teamAtual.codigoAcessoSalt = salt;
+    teamAtual.codigoAcessoHash = hash;
+    delete teamAtual.codigoAcesso;
+    mudou = true;
   }
   return mudou;
 }
@@ -8783,6 +8796,10 @@ function importBackup(file){
       // Backups antigos podem trazer a senha em texto puro (ver migração em ensureDefaults) —
       // hasheia antes de continuar, para nunca reenviar esse texto puro para a nuvem.
       await finalizarSenhaAdminSeNecessario();
+      // Backups antigos também podem trazer o código de acesso de Equipe em texto puro
+      // (ver migrarCodigosAcessoLegados) — sem isso aqui, o auto-save reenviaria esse
+      // texto puro pra nuvem sozinho, reabrindo a vulnerabilidade já corrigida antes.
+      await migrarCodigosAcessoLegados();
       markDirty();
       renderAll();
       showAlert('Backup importado. Clique em "Salvar" para enviar para a nuvem.');
