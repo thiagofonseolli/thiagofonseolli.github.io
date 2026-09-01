@@ -1804,6 +1804,20 @@ let editalTopicSearchQuery = ''; // texto atual digitado na busca do Regulamento
 function normalizeSearchText(s){
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 }
+/* Atrasa a execução de `fn` até `ms` ms sem uma nova chamada -- usado nos campos de
+   busca que reconstroem uma lista grande (ex.: Inscritos, que já foi testado com até
+   5000 registros, ver PROJETO.md) a cada letra digitada. Sem isso, cada tecla
+   reconstrói toda a lista e reata todos os listeners dela na hora, o que fica visivelmente
+   pesado em dispositivos mais fracos (tablets/notebooks de escola) com a lista grande;
+   com debounce, só a ÚLTIMA letra de uma sequência digitada rápido dispara a
+   reconstrução de verdade. */
+function debounce(fn, ms){
+  let timer = null;
+  return (...args)=>{
+    if(timer) clearTimeout(timer);
+    timer = setTimeout(()=> fn(...args), ms);
+  };
+}
 /* Verifica se um tópico (título + corpo, já com os {{...}} substituídos) contém o termo buscado. */
 function editalTopicMatchesQuery(title, bodyHtml, normalizedQuery){
   if(!normalizedQuery) return true;
@@ -6215,7 +6229,11 @@ function bindInscritosEvents(){
   });
 
   document.getElementById('alFiltroGenero').addEventListener('change', (e)=>{ inscritoFiltroGenero=e.target.value; renderInscritosBody(); });
-  document.getElementById('alBuscaTexto').addEventListener('input', (e)=>{ inscritoFiltroTexto=e.target.value; renderInscritosBody(); });
+  // O texto muda a cada tecla, mas a reconstrução da lista (que pode ter milhares de
+  // linhas, ver PROJETO.md) só precisa rodar quando a pessoa parar de digitar por um
+  // instante -- ver debounce().
+  const renderInscritosBodyAposDigitar = debounce(renderInscritosBody, 200);
+  document.getElementById('alBuscaTexto').addEventListener('input', (e)=>{ inscritoFiltroTexto=e.target.value; renderInscritosBodyAposDigitar(); });
   const alBuscaScanBtn = document.getElementById('alBuscaScanBtn');
   if(alBuscaScanBtn) alBuscaScanBtn.addEventListener('click', ()=>{
     openQrScanModal(texto=>{
@@ -6334,9 +6352,13 @@ function filteredInscritos(){
   // DEPOIS de uma importação em lote (que normalmente já vem agrupada por equipe na
   // planilha) acabava sempre no fim da lista, longe de quem é da mesma equipe, mesmo com
   // a equipe/cor/dados corretos.
-  const ordemEquipes = STATE.teams.map(t=>t.id);
+  // Mapa em vez de Array.indexOf dentro do comparador -- indexOf percorreria a lista de
+  // Equipes inteira a CADA comparação feita pelo sort (O(equipes) por comparação); com
+  // um Map pré-calculado uma vez, cada busca de posição vira O(1).
+  const ordemEquipes = new Map(STATE.teams.map((t,i)=>[t.id,i]));
   return list.slice().sort((a,b)=>{
-    const idxA = ordemEquipes.indexOf(a.teamId), idxB = ordemEquipes.indexOf(b.teamId);
+    const idxA = ordemEquipes.has(a.teamId) ? ordemEquipes.get(a.teamId) : -1;
+    const idxB = ordemEquipes.has(b.teamId) ? ordemEquipes.get(b.teamId) : -1;
     if(idxA!==idxB) return idxA-idxB;
     return (a.nome||'').localeCompare(b.nome||'', 'pt-BR');
   });
@@ -8608,10 +8630,10 @@ function bindRegulamentoIntegraEvents(){
     renderEdital();
   });
   const searchInput = document.getElementById('editalTopicSearchInput');
-  if(searchInput) searchInput.addEventListener('input', (e)=>{
+  if(searchInput) searchInput.addEventListener('input', debounce((e)=>{
     editalTopicSearchQuery = e.target.value;
     refreshEditalRegulamentoBody();
-  });
+  }, 200));
 
   bindEditalTopicDynamicEvents();
 }
