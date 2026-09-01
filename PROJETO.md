@@ -254,6 +254,19 @@ Todo o desenvolvimento seguiu este ciclo, e vale continuar:
   de sincronização). Confirmado como vulnerabilidade real, não teórica: um
   payload `<img onerror=...>` aplicado via `syncAplicarLinha` chegava
   intacto ao HTML exibido pra qualquer visitante do Edital, sem login.
+- **Colisão de IDs entre dispositivos (`next*Id()`)**: auditado e corrigido
+  (31/ago/2026) — todos os geradores de ID do app (`nextGameId`,
+  `nextEventoId`, `nextGtLocalId`, `nextGtRegraId`, `nextGtBloqueioId`,
+  `nextAglutinadorId`, `nextDesfileJuradoId`, `nextCriterioId`,
+  `nextCardapioId`, `nextCheckinId`, `nextArtisticaId`) usam salto
+  aleatório grande, igual `nextInscritoId()` (ver regra 4 da seção de
+  sincronização). **Exceção deliberada**: a geração de tabela em lote
+  (dentro de `buildAllGames`, chamada por `gerarTabelaConfrontos`) ainda usa um
+  contador sequencial interno pra montar um `STATE.games` novo do zero —
+  aceito porque é uma ação única e rara de um só admin, não um cadastro
+  incremental concorrente; corrigir isso exigiria mudar a própria função,
+  não só a chamada ao gerador de ID. Não precisa reauditar a menos que um
+  novo `next*Id()` seja criado sem seguir o padrão.
 
 ## O que precisa ser configurado numa conta/ambiente novo
 
