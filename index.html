@@ -1499,8 +1499,13 @@ function buildAllGames(teams, modalidades){
   return games;
 }
 
+/* Sequencial simples colidiria entre dispositivos criando jogos ao mesmo tempo (ex.: dois
+   admins usando o Gerador de Tabela simultaneamente) -- o salto aleatório grande faz IDs
+   calculados por dispositivos concorrentes quase certamente divergirem (mesmo padrão já
+   usado em nextInscritoId(), ver regra 4 do PROJETO.md). */
 function nextGameId(){
-  return (STATE.games.reduce((m,g)=>Math.max(m,g.id),0)) + 1;
+  const maiorAtual = STATE.games.reduce((m,g)=>Math.max(m,g.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 
 /* Status de um jogo além do binário Pendente/Concluído: se Data+Hora já foram
@@ -2572,7 +2577,7 @@ const SYNC_COLECOES = {
 };
 // Nomes de tabela que não são uma lista simples (formatos especiais, tratados à parte
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
-const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','inscrito_foto','config','imagensPendentesUpload'];
+const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
 const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth'];
 
@@ -2593,6 +2598,9 @@ function syncListarIdsAtuais(tabela){
   if(tabela==='desfileVotos') return Object.keys(STATE.desfileVotos);
   if(tabela==='ajustes') return Object.keys(STATE.ajustes);
   if(tabela==='sumula_obs') return Object.keys(STATE.sumulas);
+  // Um lançamento de súmula (gol, cartão etc.) vive dentro de STATE.sumulas[gameId].eventos
+  // -- pra listar TODOS os IDs atuais (de qualquer jogo), precisa achatar essa estrutura.
+  if(tabela==='sumula_evento') return Object.values(STATE.sumulas).flatMap(s=> (s.eventos||[]).map(e=> String(e.id)));
   if(tabela==='inscrito_foto') return STATE.inscritos.map(a=>String(a.id));
   if(tabela==='config') return SYNC_CONFIG_CHAVES;
   if(tabela==='imagensPendentesUpload') return Object.keys(STATE.imagensPendentesUpload);
@@ -2622,6 +2630,16 @@ function syncConstruirLinha(tabela, registroId){
   if(tabela==='sumula_obs'){
     const existe = !!STATE.sumulas[registroId];
     return {...base, dados: existe ? {observacoes: STATE.sumulas[registroId].observacoes||''} : null, deletado: !existe};
+  }
+  if(tabela==='sumula_evento'){
+    // Um evento pode estar em QUALQUER jogo -- procura em todas as súmulas pelo ID (os
+    // IDs de evento são únicos entre jogos, ver nextEventoId()).
+    let encontrado = null, gameIdEncontrado = null;
+    for(const gid of Object.keys(STATE.sumulas)){
+      const ev = (STATE.sumulas[gid].eventos||[]).find(e=> String(e.id)===String(registroId));
+      if(ev){ encontrado = ev; gameIdEncontrado = gid; break; }
+    }
+    return {...base, dados: encontrado ? {...encontrado, gameId: Number(gameIdEncontrado)} : null, deletado: !encontrado};
   }
   if(tabela==='inscrito_foto'){
     const a = STATE.inscritos.find(x=> String(x.id)===String(registroId));
@@ -2726,7 +2744,7 @@ function syncAplicarLinha(linha){
     if(dados) STATE.sumulas[registro_id].observacoes = dados.observacoes||'';
     return;
   }
-  if(tabela==='sumula_evento'){ syncAplicarEvento(linha); return; }
+  if(tabela==='sumula_evento'){ if(syncTemEdicaoLocalPendente('sumula_evento', registro_id)) return; syncAplicarEvento(linha); return; }
   if(tabela==='inscrito_foto'){
     if(syncTemEdicaoLocalPendente('inscrito_foto', registro_id)) return;
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
@@ -7741,10 +7759,17 @@ function getSumula(gameId){
   if(typeof STATE.sumulas[gameId].observacoes !== 'string') STATE.sumulas[gameId].observacoes = '';
   return STATE.sumulas[gameId];
 }
+/* Sequencial simples colidiria entre dispositivos lançando um evento de súmula quase ao
+   mesmo tempo (ex.: dois admins, ou admin + representante de Equipe, registrando um gol
+   cada um no seu dispositivo) -- os dois calculariam o MESMO próximo id a partir do
+   mesmo estado, e um dos dois lançamentos sumiria silenciosamente ao sincronizar (mesmo
+   "id" vira a mesma linha, com resolution=merge-duplicates, na tabela jim_sync). Salto
+   aleatório grande faz isso quase certamente divergir (mesmo padrão de nextInscritoId(),
+   ver regra 4 do PROJETO.md). */
 function nextEventoId(){
   let max=0;
   Object.values(STATE.sumulas).forEach(s=> (s.eventos||[]).forEach(e=> { if(e.id>max) max=e.id; }));
-  return max+1;
+  return max + 1 + Math.floor(Math.random()*1000000);
 }
 function sumulaTiposDaModalidade(modalidade){
   return STATE.sumulaTipos[modalidade] || STATE.sumulaTipos._default;
@@ -7769,6 +7794,14 @@ function verificarConflitoHorarioLocal(game){
   showAlert(`Atenção: já existe outra partida marcada para o mesmo local, data e horário:\n\n${lista}`);
 }
 function recomputarPlacarSumula(game){
+  // W.O. sempre tem prioridade sobre qualquer lançamento da súmula -- sem essa
+  // checagem, um jogo marcado como W.O. que já tivesse (ou viesse a ter, por engano)
+  // um lançamento que conta ponto teria o placar recalculado a partir dele no próximo
+  // render, sobrescrevendo silenciosamente o W.O. (achado ao investigar o bug do
+  // placar "fantasma" -- ver comentário abaixo). Nunca mexe em scoreA/scoreB aqui
+  // enquanto o jogo estiver em W.O.; ao desmarcar o W.O. (sdWoEl volta pro branco), o
+  // próximo recálculo já reflete os eventos existentes normalmente.
+  if(game.wo) return;
   const sumula = getSumula(game.id);
   // Só recalcula A PARTIR DE EVENTOS quando existe pelo menos um lançamento que
   // REALMENTE conta ponto (ex.: Gol) -- sem essa checagem, qualquer lançamento (até um
@@ -8077,7 +8110,7 @@ function buildGameDetailHtml(gameId){
       <div class="pill-group">
         ${tiposModalidade.map(tipo=>{
           const count = sumula.eventos.filter(e=>e.studentId===a.id && e.tipo===tipo.key).length;
-          return `<button class="pill lancamentoBtn" data-tipo="${tipo.key}" ${adminDisabled()}>${escPdf(tipo.label)}${count>0?` (${count})`:''}</button>`;
+          return `<button class="pill lancamentoBtn" data-tipo="${tipo.key}" ${(!isAdmin || game.wo)?'disabled':''}>${escPdf(tipo.label)}${count>0?` (${count})`:''}</button>`;
         }).join('')}
       </div>
     </div>`;
@@ -8115,10 +8148,18 @@ function buildGameDetailHtml(gameId){
 
   <div class="row" style="gap:16px; align-items:flex-start;">
     <div style="flex:1; min-width:280px;">
-      <div class="card"><h2 style="font-size:15px;">Escalação — ${teamChip(game.teamA, game.genero)}</h2>${rosterHtml(inscritosA,'A')}</div>
+      <div class="card">
+        <h2 style="font-size:15px;">Escalação — ${teamChip(game.teamA, game.genero)}</h2>
+        ${game.wo ? '<p class="hint">Lançamentos desabilitados — este jogo está marcado como W.O. Para lançar, remova o W.O. na seção acima.</p>' : ''}
+        ${rosterHtml(inscritosA,'A')}
+      </div>
     </div>
     <div style="flex:1; min-width:280px;">
-      <div class="card"><h2 style="font-size:15px;">Escalação — ${teamChip(game.teamB, game.genero)}</h2>${rosterHtml(inscritosB,'B')}</div>
+      <div class="card">
+        <h2 style="font-size:15px;">Escalação — ${teamChip(game.teamB, game.genero)}</h2>
+        ${game.wo ? '<p class="hint">Lançamentos desabilitados — este jogo está marcado como W.O. Para lançar, remova o W.O. na seção acima.</p>' : ''}
+        ${rosterHtml(inscritosB,'B')}
+      </div>
     </div>
   </div>
 
@@ -8191,6 +8232,7 @@ function wireGameDetailPanelEvents(gameId, panelEl){
     btn.addEventListener('click', ()=>{
       if(!isAdmin) return;
       refrescarGame();
+      if(game.wo) return; // nunca lança evento num jogo já resolvido por W.O. (ver recomputarPlacarSumula)
       const card = btn.closest('[data-inscrito]');
       const studentId = Number(card.dataset.inscrito);
       const side = card.dataset.side;
@@ -8198,6 +8240,12 @@ function wireGameDetailPanelEvents(gameId, panelEl){
       sumula.eventos.push(evento);
       recomputarPlacarSumula(game);
       markDirty();
+      // syncMarcarPendente garante reenvio no próximo ciclo mesmo se o envio imediato
+      // abaixo falhar (rede instável no exato momento do clique) -- sumula_evento agora
+      // faz parte do mecanismo genérico de detecção/reenvio (ver SYNC_TABELAS_ESPECIAIS),
+      // não depende só do "fire and forget" abaixo, que existe só pra chegar mais rápido
+      // nos outros dispositivos quando dá certo de primeira.
+      syncMarcarPendente('sumula_evento', evento.id);
       syncEnviarLote([{id:`sumula_evento:${evento.id}`, tabela:'sumula_evento', registro_id:String(evento.id), dados:{...evento, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
       renderScoreboard(); rerender();
     });
@@ -8211,9 +8259,16 @@ function wireGameDetailPanelEvents(gameId, panelEl){
       const inscrito = STATE.inscritos.find(a=>a.id===eventoRemovido.studentId);
       const label = tipoInfo(eventoRemovido.tipo, game.modalidade).label;
       showConfirm(`Remover o lançamento "${label}" de ${inscrito?escPdf(inscrito.nome):'inscrito removido'}? Se esse tipo contar ponto, o placar é recalculado automaticamente ao remover.`, ()=>{
+        // Busca o jogo de novo (não usa `game` capturado antes do showConfirm) -- uma
+        // sincronização concorrente pode ter substituído o objeto nesse meio-tempo
+        // enquanto o diálogo esperava confirmação (mesma regra 1 já aplicada em outros
+        // pontos do app, ver PROJETO.md).
+        const gameAtual = refrescarGame();
+        if(!gameAtual) return; // jogo removido nesse meio-tempo
         sumula.eventos = sumula.eventos.filter(e=>e.id!==evId);
-        recomputarPlacarSumula(game);
+        recomputarPlacarSumula(gameAtual);
         markDirty();
+        syncMarcarPendente('sumula_evento', evId);
         syncEnviarDelecaoImediata('sumula_evento', evId, {...eventoRemovido, gameId});
         renderScoreboard(); rerender();
       });
