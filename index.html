@@ -1492,7 +1492,7 @@ function buildAllGames(teams, modalidades){
       const ids = elegiveis.map(t=>t.id);
       roundRobinPairs(ids).forEach(([a,b])=>{
         games.push({id:id++, modalidade:mod, genero:gen,
-          teamA:a, teamB:b, scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null});
+          teamA:a, teamB:b, scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null, placarPorEventos:false});
       });
     });
   });
@@ -1529,7 +1529,7 @@ function regenerateMissingGames(){
           ((g.teamA===a&&g.teamB===b)||(g.teamA===b&&g.teamB===a)));
         if(!exists){
           STATE.games.push({id:nextGameId(), modalidade:mod, genero:gen,
-            teamA:a, teamB:b, scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null});
+            teamA:a, teamB:b, scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null, placarPorEventos:false});
           added++;
         }
       });
@@ -2013,6 +2013,7 @@ function ensureDefaults(s){
     if(typeof m.label !== 'string' || !m.label) m.label = m.key;
   });
   if(!Array.isArray(s.games)) s.games = [];
+  s.games.forEach(g=>{ if(typeof g.placarPorEventos !== 'boolean') g.placarPorEventos = false; });
   if(!s.individual) s.individual = {};
   if(!s.desfile) s.desfile = {};
   if(!s.ajustes) s.ajustes = {};
@@ -3357,7 +3358,7 @@ function openClearModal(){
 function closeClearModal(){ document.getElementById('clearModal').classList.remove('open'); }
 
 function clearResultadosJogos(){
-  STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; g.wo=null; g.fpA=null; g.fpB=null; g.data=''; g.hora=''; g.local=''; });
+  STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; g.wo=null; g.fpA=null; g.fpB=null; g.data=''; g.hora=''; g.local=''; g.placarPorEventos=false; });
 }
 function clearIndividualData(){ STATE.individual = {}; }
 const DESFILE_JURADO_LEGADO_ID = -1; // id reservado pro "jurado" que representa a nota já lançada antes de existir avaliação por múltiplos jurados
@@ -3420,7 +3421,7 @@ function clearInscritosData(){
 }
 function clearSumulasData(){
   STATE.sumulas = {};
-  STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; });
+  STATE.games.forEach(g=>{ g.scoreA=null; g.scoreB=null; g.placarPorEventos=false; });
 }
 function clearCardapioData(){ STATE.cardapio = []; STATE.checkins = []; }
 function clearTudoFactory(){
@@ -3986,7 +3987,7 @@ function renderJogos(){
       const elegiveis = teamsParaGenero(STATE.teams, genero).map(t=>t.id);
       if(!elegiveis.includes(teamA) || !elegiveis.includes(teamB)){ showAlert('Uma das Equipes escolhidas não participa dessa categoria de gênero (confira em Inscrições → Equipes).'); return; }
       const novoJogo = {id:nextGameId(), modalidade, genero, teamA, teamB,
-        scoreA:null, scoreB:null, wo:null, data, hora, local, fpA:null, fpB:null};
+        scoreA:null, scoreB:null, wo:null, data, hora, local, fpA:null, fpB:null, placarPorEventos:false};
       STATE.games.push(novoJogo);
       markDirty(); renderGamesList(); renderScoreboard();
       verificarConflitoHorarioLocal(novoJogo);
@@ -7769,12 +7770,25 @@ function verificarConflitoHorarioLocal(game){
 }
 function recomputarPlacarSumula(game){
   const sumula = getSumula(game.id);
-  // só recalcula quando existe pelo menos um lançamento que REALMENTE conta ponto (ex.:
-  // Gol) -- antes, qualquer lançamento (até um Cartão Amarelo, que não conta ponto)
-  // disparava o recálculo e zerava um placar digitado manualmente. Ver conversa: bug
-  // confirmado com teste antes desta correção.
+  // Só recalcula A PARTIR DE EVENTOS quando existe pelo menos um lançamento que
+  // REALMENTE conta ponto (ex.: Gol) -- sem essa checagem, qualquer lançamento (até um
+  // Cartão Amarelo, que não conta ponto) disparava o recálculo e zerava um placar
+  // digitado manualmente. Mas isso sozinho criava OUTRO bug: se o placar já estava
+  // sendo calculado a partir de eventos e o ÚLTIMO lançamento que contava ponto era
+  // removido, a função simplesmente não fazia nada -- o placar ficava "fantasma",
+  // continuando a marcar um gol que já tinha sumido da súmula (bug relatado e
+  // confirmado com teste). `game.placarPorEventos` (persistido, sincroniza junto com o
+  // resto do jogo) existe pra distinguir os dois casos: só reseta o placar quando ele
+  // realmente vinha sendo calculado por eventos; nunca mexe num placar genuinamente
+  // manual (que nunca teve `placarPorEventos` marcado).
   const eventosQueContam = sumula.eventos.filter(ev => tipoInfo(ev.tipo, game.modalidade).contaPlacar);
-  if(eventosQueContam.length===0) return; // preserva placar lançado manualmente na aba Jogos até haver lançamento que conte ponto
+  if(eventosQueContam.length===0){
+    if(game.placarPorEventos){
+      game.scoreA = null; game.scoreB = null;
+      game.placarPorEventos = false;
+    }
+    return; // preserva placar lançado manualmente (nunca foi calculado por eventos)
+  }
   let placarA=0, placarB=0;
   eventosQueContam.forEach(ev=>{
     const valor = tipoInfo(ev.tipo, game.modalidade).valor||1;
@@ -7782,6 +7796,7 @@ function recomputarPlacarSumula(game){
   });
   game.scoreA = placarA;
   game.scoreB = placarB;
+  game.placarPorEventos = true;
 }
 
 /* ===================== AVISOS E CONFIRMAÇÕES (substituem alert()/confirm() nativos) =====================
