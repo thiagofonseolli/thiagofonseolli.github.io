@@ -8175,7 +8175,9 @@ function buildGameDetailHtml(gameId){
   </div>
 
   <div class="card">
-    <h2 style="font-size:15px;">Registro Cronológico</h2>
+    <h2 style="font-size:15px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">Registro Cronológico
+      ${isAdmin && sumula.eventos.length>0 ? `<button class="btn danger small btnResetarLancamentos" style="font-weight:400; font-size:12.5px;" title="Apaga TODOS os lançamentos deste jogo e devolve o placar ao estado editável">🔄 Resetar lançamentos deste jogo</button>` : ''}
+    </h2>
     ${logHtml}
   </div>
 
@@ -8285,8 +8287,35 @@ function wireGameDetailPanelEvents(gameId, panelEl){
       });
     });
   });
+  panelEl.querySelectorAll('.btnResetarLancamentos').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!isAdmin) return;
+      refrescarGame();
+      if(sumula.eventos.length===0) return;
+      const qtd = sumula.eventos.length;
+      showConfirm(`Resetar TODOS os ${qtd} lançamento${qtd>1?'s':''} deste jogo (gols, cartões etc.)? O placar volta a ficar em branco, editável manualmente. Essa ação não pode ser desfeita.`, ()=>{
+        // Busca o jogo de novo (regra 1 do PROJETO.md — ver mesmo cuidado no removeEvento
+        // acima): uma sincronização concorrente pode ter substituído o objeto enquanto o
+        // diálogo esperava confirmação.
+        const gameAtual = refrescarGame();
+        if(!gameAtual) return; // jogo removido nesse meio-tempo
+        const eventosRemovidos = sumula.eventos.slice();
+        sumula.eventos = [];
+        recomputarPlacarSumula(gameAtual); // com a lista vazia, zera o placar de volta a null (ver correção do placar "fantasma")
+        markDirty();
+        // Cada lançamento precisa da própria "lápide" de exclusão (sumula_evento é uma
+        // linha por evento na sincronização) -- sem isso, um PULL futuro de outro
+        // dispositivo (ou uma reconexão) reaplicaria os eventos antigos individualmente,
+        // já que eles nunca teriam sido marcados como removidos.
+        eventosRemovidos.forEach(ev=>{
+          syncMarcarPendente('sumula_evento', ev.id);
+          syncEnviarDelecaoImediata('sumula_evento', ev.id, {...ev, gameId});
+        });
+        renderScoreboard(); rerender();
+      });
+    });
+  });
 }
-
 /* ===================== CLASSIFICAÇÃO ===================== */
 let expandedTeamId = null; // linha de "extrato" (de onde vieram os pontos) expandida na Classificação Geral — só uma por vez
 
