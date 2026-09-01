@@ -4381,14 +4381,20 @@ function gtExpandDatas(local){
   }
   return datas.length ? datas : [null];
 }
+/* Sequencial simples colidiria entre dispositivos editando o Gerador de Tabela ao mesmo
+   tempo -- mesmo padrão de salto aleatório já usado em nextInscritoId()/nextGameId()/
+   nextEventoId(), ver regra 4 do PROJETO.md. */
 function nextGtLocalId(){
-  return (STATE.geradorTabela.locais.reduce((m,l)=>Math.max(m,l.id),0)) + 1;
+  const maiorAtual = STATE.geradorTabela.locais.reduce((m,l)=>Math.max(m,l.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function nextGtRegraId(){
-  return (STATE.geradorTabela.regras.reduce((m,r)=>Math.max(m,r.id),0)) + 1;
+  const maiorAtual = STATE.geradorTabela.regras.reduce((m,r)=>Math.max(m,r.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function nextGtBloqueioId(local){
-  return ((local.bloqueios||[]).reduce((m,b)=>Math.max(m,b.id),0)) + 1;
+  const maiorAtual = (local.bloqueios||[]).reduce((m,b)=>Math.max(m,b.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 
 /* ----- Renderização principal ----- */
@@ -5315,8 +5321,10 @@ function bindModalidadesContentEvents(){
   renderModalidadesChips();
   bindModalidadesArtisticasEvents();
 }
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
 function nextAglutinadorId(){
-  return (STATE.aglutinadores.reduce((m,g)=>Math.max(m,g.id),0)) + 1;
+  const maiorAtual = STATE.aglutinadores.reduce((m,g)=>Math.max(m,g.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function renderAglutinadoresList(){
   const wrap = document.getElementById('aglutinadoresList');
@@ -6452,7 +6460,8 @@ function saveEditInscritoModal(){
 
 /* ===================== MODALIDADES ARTÍSTICAS ===================== */
 const LINGUAGENS_ARTISTICAS = ['Música', 'Teatro', 'Dança', 'Artes Visuais', 'Outra'];
-function nextArtisticaId(){ return (STATE.modalidadesArtisticas.reduce((m,x)=>Math.max(m,x.id),0)) + 1; }
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
+function nextArtisticaId(){ return (STATE.modalidadesArtisticas.reduce((m,x)=>Math.max(m,x.id),0)) + 1 + Math.floor(Math.random()*1000000); }
 
 function renderModalidadesArtisticasContentHtml(){
   const inscritosOrdenados = inscritosOrdenadosPorNome();
@@ -7337,8 +7346,9 @@ function commitImportPlan(plano){
 }
 
 /* ===================== ALIMENTAÇÃO ===================== */
-function nextCardapioId(){ return (STATE.cardapio.reduce((m,c)=>Math.max(m,c.id),0)) + 1; }
-function nextCheckinId(){ return (STATE.checkins.reduce((m,c)=>Math.max(m,c.id),0)) + 1; }
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
+function nextCardapioId(){ return (STATE.cardapio.reduce((m,c)=>Math.max(m,c.id),0)) + 1 + Math.floor(Math.random()*1000000); }
+function nextCheckinId(){ return (STATE.checkins.reduce((m,c)=>Math.max(m,c.id),0)) + 1 + Math.floor(Math.random()*1000000); }
 let checkinFiltroequipe = 'todas';
 
 function findInscritoPorCodigoOuNome(valorDigitado){
@@ -8819,8 +8829,10 @@ function renderIndivTable(){
 /* ----- Desfile de Abertura ----- */
 let desfileJuradoSelecionado = null; // qual jurado está lançando votos agora (seleção de tela, não faz parte de STATE)
 
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
 function nextDesfileJuradoId(){
-  return (STATE.desfileJurados.reduce((m,j)=>Math.max(m,j.id),0)) + 1;
+  const maiorAtual = STATE.desfileJurados.reduce((m,j)=>Math.max(m,j.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function renderDesfileContentHtml(){
   // Preserva, como voto de um "jurado" especial, qualquer nota de desfile já lançada
@@ -9029,8 +9041,10 @@ function renderAjustesBody(){
    Individuais, Desfile e Ajustes). Cada critério vira uma tabela com um valor de
    pontos editável por equipe, e esses pontos entram automaticamente na soma do total
    de cada equipe (ver STATE.criteriosPersonalizados em computeStandings). */
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
 function nextCriterioId(){
-  return (STATE.criteriosPersonalizados.reduce((m,c)=>Math.max(m,c.id),0)) + 1;
+  const maiorAtual = STATE.criteriosPersonalizados.reduce((m,c)=>Math.max(m,c.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function renderCriteriosContentHtml(){
   return `<div class="card">
