@@ -9770,6 +9770,22 @@ function mostrarErroCarregamentoInicial(){
   renderAll();
 })();
 </script>
+<script>
+/* Registra o Service Worker que cacheia o "esqueleto" do app (index.html), pra ele
+   continuar abrindo mesmo com rede instável ou momentaneamente fora do ar -- ver
+   sw.js. Não guarda nada de STATE/dados do torneio, só os arquivos do app em si (ver
+   comentário no topo de sw.js pra detalhes e o porquê desse limite).
+
+   Registrado depois do "load" da página (não compete com o carregamento inicial do
+   app) e com falha silenciosa -- se o navegador não suportar Service Worker, ou o
+   registro der errado por qualquer motivo, o app continua funcionando normalmente,
+   só sem esse reforço extra. */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  });
+}
+</script>
 
 </body>
 </html>
