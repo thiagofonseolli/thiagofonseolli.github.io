@@ -3864,6 +3864,7 @@ function renderPainel(){
     </div>` : ''}
   </div>`;
   document.getElementById('main').innerHTML = html;
+  document.querySelectorAll('#main .btnExportarClassificacaoCsv').forEach(b=> b.addEventListener('click', exportarClassificacaoCsv));
   document.querySelectorAll('.classificacaoRow').forEach(row=>{
     row.addEventListener('click', ()=>{
       const teamId = row.dataset.teamid;
@@ -8334,6 +8335,42 @@ function buildExtratoEquipeHtml(teamId){
   return corpo || '<p class="hint" style="margin:0;">Nenhuma pontuação lançada ainda para esta Equipe.</p>';
 }
 
+/* Escapa um valor pra uma célula de CSV: envolve em aspas se contiver separador,
+   aspas ou quebra de linha, dobrando aspas internas. */
+function csvEscape(valor){
+  const str = String(valor==null ? '' : valor);
+  if(/["\n;]/.test(str)) return '"' + str.replace(/"/g,'""') + '"';
+  return str;
+}
+/* Baixa a Classificação Geral (mesmas linhas de computeStandings(), na mesma ordem já
+   exibida) como um arquivo .csv. Usa ";" como separador (não ",") porque o Excel na
+   configuração regional brasileira usa "," como separador decimal e trata "," como
+   delimitador de campo errado nesse caso -- abrir um CSV com vírgula direto no Excel
+   pt-BR jogaria tudo numa coluna só. O BOM (\uFEFF) no início evita acentos quebrados
+   ao abrir no Excel (sem ele, o Excel às vezes assume uma codificação errada pro
+   arquivo). Disponível pra qualquer visitante, não só admin -- a Classificação Geral já
+   é pública no Painel, exportar em CSV não expõe nada que a tela já não mostre. */
+function exportarClassificacaoCsv(){
+  const rows = computeStandings();
+  const criterios = STATE.criteriosPersonalizados||[];
+  const cabecalho = ['#','Equipe','Jogos','Saldo','Jogo Limpo','Individuais','Desfile','Ajustes', ...criterios.map(c=>c.nome), 'Total'];
+  const linhas = [cabecalho];
+  rows.forEach((r,i)=>{
+    const colunasCriterios = criterios.map(c=> Number(c.pontos[r.team.id])||0);
+    linhas.push([i+1, r.team.label, r.pontosJogos, r.saldo, r.fair, r.pontosIndividual, r.pontosDesfile, r.pontosAjustes, ...colunasCriterios, r.total]);
+  });
+  const csv = '\uFEFF' + linhas.map(linha=> linha.map(csvEscape).join(';')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const nomeArquivo = (STATE.eventName||'classificacao').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase();
+  a.download = `classificacao-${nomeArquivo || 'geral'}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 function classificacaoHtml(){
   const rows = computeStandings();
   // Uma coluna PRA CADA critério personalizado, na ordem cadastrada, com o nome atual
@@ -8343,7 +8380,7 @@ function classificacaoHtml(){
   // única somando tudo.
   const criterios = STATE.criteriosPersonalizados||[];
   const totalColunas = 9 + criterios.length; // #, equipe, Jogos, Saldo, JogoLimpo, Individuais, Desfile, Ajustes, [critérios...], Total
-  let html = `<div class="card"><h2>Classificação Geral</h2>
+  let html = `<div class="card"><h2 style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">Classificação Geral <button class="btn small secondary btnExportarClassificacaoCsv" style="font-weight:400; font-size:12.5px;" title="Baixa esta tabela como planilha (.csv)">⬇ Exportar CSV</button></h2>
     <p class="hint">Clique numa Equipe para ver de onde vieram os pontos dela.</p>
     <table><thead><tr><th>#</th><th>equipe</th><th>Jogos</th><th>Saldo</th><th>Jogo Limpo</th><th>Individuais</th><th>Desfile</th><th>Ajustes</th>${criterios.map(c=>`<th>${escPdf(c.nome)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
   rows.forEach((r,i)=>{
@@ -9126,6 +9163,7 @@ function openPainelModal(){
     <img src="${LOGO_NAC_B64}" alt="NAC — Núcleo de Atividades Complementares">
   </div>`;
   document.getElementById('painelModalContent').innerHTML = printHeader + `<h2 style="color:var(--navy); margin-top:0;">${escPdf(STATE.eventName)} — Classificação Geral</h2>` + classificacaoHtml();
+  document.querySelectorAll('#painelModalContent .btnExportarClassificacaoCsv').forEach(b=> b.addEventListener('click', exportarClassificacaoCsv));
   document.getElementById('painelModal').classList.add('open');
 }
 function closePainelModal(){ document.getElementById('painelModal').classList.remove('open'); }
