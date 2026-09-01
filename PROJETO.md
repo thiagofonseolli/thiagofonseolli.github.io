@@ -104,7 +104,17 @@ motivo concreto (bug real encontrado e corrigido):
    app, não só de PDF). Uma varredura de segurança encontrou e corrigiu
    mais de uma dúzia de pontos sem isso — alguns eram XSS persistente de
    verdade (ex.: título de tópico do regulamento, que virava HTML real ao
-   ser relido).
+   ser relido). **Única exceção deliberada**: `STATE.editalHtml` (o
+   regulamento) precisa virar HTML de verdade pra suportar formatação rica
+   (tabelas, imagens do documento original) — não dá pra escapar como
+   texto puro. Como esse campo sincroniza abertamente e pode chegar via
+   API direta (bypass do app, ver seção de RLS abaixo), ele passa por
+   `sanitizeEditalHtml()` (allowlist de tags/atributos, remove `<script>`,
+   `on*`, `javascript:` etc.) no momento em que ENTRA em `STATE` vindo de
+   fora (`syncAplicarLinha`/`ensureDefaults`) — nunca confia que o HTML já
+   chegou seguro. Se algum dia esse campo passar a existir DERIVADO de
+   outro texto (não só editado direto no editor rico do app), sanitize de
+   novo lá também.
 
 7. **Botões que fazem algo irreversível (remover) sempre pedem confirmação**
    via `showConfirm()` — uma varredura já mapeou todos os ~17 botões desse
@@ -239,6 +249,11 @@ Todo o desenvolvimento seguiu este ciclo, e vale continuar:
   PBKDF2 (600k iterações), com upgrade automático de hashes antigos no
   próximo login. Limite aceito e documentado: verificação ainda roda no
   navegador de quem tenta entrar (ver ponto 5 da seção de sincronização).
+- **XSS via `editalHtml` escrito direto na API (bypass do app)**: auditado
+  e corrigido (31/ago/2026) — `sanitizeEditalHtml()` (ver ponto 6 da seção
+  de sincronização). Confirmado como vulnerabilidade real, não teórica: um
+  payload `<img onerror=...>` aplicado via `syncAplicarLinha` chegava
+  intacto ao HTML exibido pra qualquer visitante do Edital, sem login.
 
 ## O que precisa ser configurado numa conta/ambiente novo
 
