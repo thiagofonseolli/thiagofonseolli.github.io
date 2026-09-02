@@ -277,6 +277,20 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="adminSenhaPromptModal">
+  <div class="modal-box" style="max-width:380px;">
+    <button class="modal-close" id="closeAdminSenhaPromptModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;" id="adminSenhaPromptTitulo">Confirme sua senha</h2>
+    <p class="hint" id="adminSenhaPromptTexto"></p>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Senha de administrador</label><input type="password" id="adminSenhaPromptInput" style="width:100%;"></div>
+    <p id="adminSenhaPromptMsg" style="font-size:12.5px; display:none; color:var(--crimson);"></p>
+    <div class="modal-actions">
+      <button class="btn secondary" id="adminSenhaPromptCancelBtn">Cancelar</button>
+      <button class="btn" id="adminSenhaPromptConfirmBtn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="changePasswordModal">
   <div class="modal-box" style="max-width:400px;">
     <button class="modal-close" id="closeChangePasswordModal">&times;</button>
@@ -886,6 +900,7 @@ async function defaultState(){
     adminPasswordHash: null,
     adminPasswordAlgo: null, // 'pbkdf2' quando já migrado (ver PBKDF2_ITERACOES) -- null/ausente = formato legado (SHA-256 simples, hashSenhaAdmin)
     adminPasswordIter: null,
+    codigoAcessoCifraSalt: null, // salt público (não é segredo) usado pra derivar a chave de cifra do código de acesso de Equipe -- ver cifrarCodigoAcesso()
     teams, modalidades,
     games: buildAllGames(teams, modalidades),
     individual: {}, desfile: {}, ajustes: {}, inscritos: [],
@@ -1211,6 +1226,7 @@ async function ensureDefaults(s){
   if(typeof s.adminPasswordHash !== 'string') s.adminPasswordHash = null;
   if(s.adminPasswordAlgo !== 'pbkdf2') s.adminPasswordAlgo = null; // formato legado por padrão -- migra sozinho no próximo login bem-sucedido (ver verificarSenhaAdmin)
   if(typeof s.adminPasswordIter !== 'number') s.adminPasswordIter = null;
+  if(typeof s.codigoAcessoCifraSalt !== 'string') s.codigoAcessoCifraSalt = null;
   if(!s.header) s.header = defaultHeader();
   if(s.header.eyebrow==null) s.header.eyebrow = defaultHeader().eyebrow;
   if(s.header.subtitle==null) s.header.subtitle = defaultHeader().subtitle;
@@ -1580,6 +1596,14 @@ let STATE = null;
 let activeTab = 'painel';
 let dirty = false;
 let isAdmin = false;
+/* Cópia da senha de admin EM MEMÓRIA (nunca persistida, nunca sincronizada, nunca
+   enviada a lugar nenhum) — só existe pra permitir cifrar um código de acesso de
+   Equipe recém-gerado sem precisar pedir a senha de novo toda vez (ver
+   codigoAcessoCifrado/pedirSenhaAdmin). Preenchida ao fazer login com a senha
+   (attemptLogin) ou ao confirmar a senha em qualquer prompt (pedirSenhaAdmin) — nunca
+   ao restaurar uma sessão via sessionStorage (restoreAdminSession), já que aí a senha
+   em si nunca é digitada de novo. Apagada no logout (doLogout). */
+let adminSenhaEmMemoria = null;
 let accessoEquipeId = null; // ID da Equipe cujo código de acesso restrito foi usado pra entrar (ver attemptLoginCodigoEquipe) — null quando não está nesse modo. Nunca fica true junto com isAdmin.
 const TEAM_ACCESS_SESSION_KEY = 'jim2026-team-access-session';
 
@@ -1717,6 +1741,102 @@ async function definirSenhaAdmin(novaSenha){
   STATE.adminPasswordAlgo = algo;
   STATE.adminPasswordIter = iter;
 }
+/* ===================== CÓDIGO DE ACESSO DE EQUIPE: CÓPIA CIFRADA (revelável pelo admin) =====================
+   Além do hash de sempre (codigoAcessoHash, usado pra VERIFICAR o login da Equipe, sem
+   precisar de senha nenhuma), cada Equipe pode ter uma SEGUNDA cópia do mesmo código,
+   cifrada com AES-GCM usando uma chave derivada da senha de admin (PBKDF2, mesmo
+   PBKDF2_ITERACOES do hash) -- só essa cópia extra permite ao admin "Revelar" o código
+   de novo depois, caso o representante esqueça. O hash em si nunca muda e nunca é usado
+   pra decifrar nada; as duas coisas coexistem, servindo pra propósitos diferentes.
+
+   Isso NÃO é uma vulnerabilidade nova: o texto cifrado só é legível por quem souber a
+   senha de admin -- e quem já sabe a senha de admin já tem controle total do painel
+   (pode ver/editar QUALQUER dado, inclusive coisas bem mais sensíveis, como restrição
+   alimentar/alergia de cada inscrito). Ou seja, revelar um código de Equipe não abre
+   nenhuma porta que quebrar a senha de admin já não abrisse. O texto cifrado sincroniza
+   abertamente que nem tudo mais no app (STATE.codigoAcessoCifraSalt é a exceção: um
+   salt público, não segredo nenhum -- só precisa ser o MESMO toda vez que uma chave for
+   derivada, pra decifrar com sucesso).
+
+   Limite aceito: se a senha de admin for esquecida OU trocada sem re-cifrar tudo antes
+   (ver confirmChangePassword, que já cuida de re-cifrar automaticamente), os códigos já
+   cifrados ficam ilegíveis pra sempre -- o login da Equipe continua funcionando
+   normalmente (o hash não depende de nada disso), só a função "Revelar" para de
+   funcionar pra esses códigos específicos; gerar um código novo resolve. Códigos
+   gerados ANTES desta funcionalidade existir nunca tiveram a cópia cifrada criada, então
+   também não são reveláveis retroativamente -- só um código novo já nasce revelável. */
+function bufParaBase64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function base64ParaBuf(b64){ return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)); }
+async function derivarChaveCifraCodigoAcesso(senhaAdmin, salt){
+  const enc = new TextEncoder();
+  const chaveBase = await crypto.subtle.importKey('raw', enc.encode(senhaAdmin), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', hash:'SHA-256', salt:enc.encode(salt), iterations:PBKDF2_ITERACOES},
+    chaveBase, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']
+  );
+}
+/* Cifra codigoPlano com a senha de admin atual. Gera STATE.codigoAcessoCifraSalt uma
+   única vez (não é segredo -- só precisa ser estável) se ainda não existir. Retorna
+   {cifrado, iv} em base64, prontos pra guardar em team.codigoAcessoCifrado/
+   codigoAcessoCifradoIv. O IV precisa ser único a cada chamada (AES-GCM não pode reusar
+   IV com a mesma chave) -- por isso é gerado de novo toda vez, mesmo cifrando com a
+   mesma senha/salt de sempre. */
+async function cifrarCodigoAcesso(codigoPlano, senhaAdmin){
+  if(!STATE.codigoAcessoCifraSalt) STATE.codigoAcessoCifraSalt = gerarSaltSenha();
+  const chave = await derivarChaveCifraCodigoAcesso(senhaAdmin, STATE.codigoAcessoCifraSalt);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cifrado = await crypto.subtle.encrypt({name:'AES-GCM', iv}, chave, new TextEncoder().encode(codigoPlano));
+  return {cifrado: bufParaBase64(cifrado), iv: bufParaBase64(iv)};
+}
+/* Decifra um código guardado. Lança exceção se a senha estiver errada (AES-GCM detecta
+   adulteração/chave errada e recusa decifrar, em vez de devolver lixo silenciosamente)
+   -- quem chama trata isso como "não foi possível revelar", nunca mostra um resultado
+   incorreto sem avisar. */
+async function decifrarCodigoAcesso(cifradoBase64, ivBase64, senhaAdmin){
+  const chave = await derivarChaveCifraCodigoAcesso(senhaAdmin, STATE.codigoAcessoCifraSalt);
+  const decifrado = await crypto.subtle.decrypt({name:'AES-GCM', iv: base64ParaBuf(ivBase64)}, chave, base64ParaBuf(cifradoBase64));
+  return new TextDecoder().decode(decifrado);
+}
+/* Prompt reutilizável (retorna uma Promise) pra confirmar a senha de admin antes de uma
+   ação sensível (cifrar um código novo quando a sessão foi restaurada sem a senha em
+   memória, ou revelar um código já cifrado). Resolve com a própria senha digitada (e já
+   deixa em adminSenhaEmMemoria pro resto da sessão, evitando perguntar nas próximas
+   vezes) se confirmada corretamente, ou com null se cancelada (botão Cancelar, X, ou
+   Esc). Nunca resolve com uma senha errada -- só fecha o modal quando
+   verificarSenhaAdmin() confirma. */
+let _pedirSenhaAdminResolve = null;
+function closeAdminSenhaPromptModal(){
+  document.getElementById('adminSenhaPromptModal').classList.remove('open');
+  if(_pedirSenhaAdminResolve){ const r = _pedirSenhaAdminResolve; _pedirSenhaAdminResolve = null; r(null); }
+}
+function pedirSenhaAdmin(titulo, texto){
+  return new Promise((resolve)=>{
+    _pedirSenhaAdminResolve = resolve;
+    document.getElementById('adminSenhaPromptTitulo').textContent = titulo;
+    document.getElementById('adminSenhaPromptTexto').textContent = texto;
+    const input = document.getElementById('adminSenhaPromptInput');
+    input.value = '';
+    document.getElementById('adminSenhaPromptMsg').style.display = 'none';
+    document.getElementById('adminSenhaPromptModal').classList.add('open');
+    input.focus();
+  });
+}
+async function confirmarAdminSenhaPrompt(){
+  const input = document.getElementById('adminSenhaPromptInput');
+  const msg = document.getElementById('adminSenhaPromptMsg');
+  const senha = input.value;
+  if(!senha) return;
+  if(!(await verificarSenhaAdmin(senha))){
+    msg.textContent = 'Senha incorreta.';
+    msg.style.display = 'block';
+    input.value = '';
+    input.focus();
+    return;
+  }
+  adminSenhaEmMemoria = senha;
+  document.getElementById('adminSenhaPromptModal').classList.remove('open');
+  if(_pedirSenhaAdminResolve){ const r = _pedirSenhaAdminResolve; _pedirSenhaAdminResolve = null; r(senha); }
+}
 /* Chamada uma vez, na inicialização (e após importar um backup): garante que STATE sempre
    tenha um hash válido. Cobre dois casos — (1) uma instalação nova, que nunca teve senha
    nenhuma, usa a senha padrão; (2) um backup salvo antes desta mudança, que ainda trazia
@@ -1847,7 +1967,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth','codigoAcessoCifraSalt'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -1932,6 +2052,7 @@ function syncConstruirLinha(tabela, registroId){
       crachaConfig: STATE.crachaConfig,
       editalHtml: STATE.editalHtml,
       adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash, algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter},
+      codigoAcessoCifraSalt: STATE.codigoAcessoCifraSalt || null,
     };
     return {...base, dados: valores[registroId], deletado:false};
   }
@@ -2053,6 +2174,7 @@ function syncAplicarLinha(linha){
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = sanitizeEditalHtml(dados);
     else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null; }
+    else if(registro_id==='codigoAcessoCifraSalt') STATE.codigoAcessoCifraSalt = dados||null;
     return;
   }
 }
@@ -2533,6 +2655,7 @@ async function attemptLogin(){
   const val = document.getElementById('loginPassword').value;
   if(await verificarSenhaAdmin(val)){
     isAdmin = true;
+    adminSenhaEmMemoria = val;
     try{ sessionStorage.setItem(ADMIN_SESSION_KEY,'1'); }catch(e){}
     closeLoginModal();
     renderAll();
@@ -2589,6 +2712,7 @@ async function attemptLoginCodigoEquipe(){
 }
 function doLogout(){
   isAdmin = false;
+  adminSenhaEmMemoria = null;
   activeTab = 'painel';
   try{ sessionStorage.removeItem(ADMIN_SESSION_KEY); }catch(e){}
   renderAll();
@@ -2626,7 +2750,30 @@ async function confirmChangePassword(){
   if(!(await verificarSenhaAdmin(atual))){ msg.textContent = 'Senha atual incorreta.'; return; }
   if(nova1 !== nova2){ msg.textContent = 'Os dois campos de nova senha não são iguais. Digite a mesma senha nos dois campos.'; return; }
   if(nova1.length < 4){ msg.textContent = 'A nova senha deve ter pelo menos 4 caracteres.'; return; }
+  // Re-cifra os códigos de acesso já revisáveis (ver cifrarCodigoAcesso) com a senha
+  // NOVA, antes de trocar de vez -- sem isso, cada troca de senha deixaria pra sempre
+  // ilegíveis todos os códigos já cifrados até então (cifrados com uma chave derivada
+  // da senha antiga, que ninguém mais teria como digitar de novo). Usa a senha ATUAL
+  // (ainda em mãos aqui, já confirmada acima) pra decifrar antes de trocar.
+  for(const team of STATE.teams){
+    if(!team.codigoAcessoCifrado) continue;
+    try{
+      const codigoPlano = await decifrarCodigoAcesso(team.codigoAcessoCifrado, team.codigoAcessoCifradoIv, atual);
+      const {cifrado, iv} = await cifrarCodigoAcesso(codigoPlano, nova1);
+      team.codigoAcessoCifrado = cifrado;
+      team.codigoAcessoCifradoIv = iv;
+    }catch(e){
+      // Não deveria acontecer (acabamos de confirmar a senha atual), mas se por algum
+      // motivo a decifra falhar (dado corrompido etc.), só descarta essa cópia cifrada
+      // em vez de travar a troca de senha inteira -- o login da Equipe com esse código
+      // continua funcionando normalmente (não depende disso), só deixa de ser revelável
+      // até gerar um código novo.
+      delete team.codigoAcessoCifrado;
+      delete team.codigoAcessoCifradoIv;
+    }
+  }
   await definirSenhaAdmin(nova1);
+  adminSenhaEmMemoria = nova1;
   markDirty();
   msg.style.color = 'var(--green)';
   msg.textContent = 'Senha alterada com sucesso! Use a nova senha no próximo login. Clique em "💾 Salvar" para gravar essa alteração.';
@@ -4635,10 +4782,17 @@ function renderCodigosAcessoBody(){
   if(!body) return;
   body.innerHTML = STATE.teams.map(t=>{
     const qtdInscritos = STATE.inscritos.filter(a=>a.teamId===t.id).length;
+    let statusHtml;
+    if(!t.codigoAcessoHash) statusHtml = '<span class="hint" style="margin:0;">Nenhum código gerado</span>';
+    else if(t.codigoAcessoCifrado) statusHtml = '<span class="hint" style="margin:0;">🔓 Código gerado (revelável)</span>';
+    else statusHtml = '<span class="hint" style="margin:0;">🔒 Código gerado</span>';
     return `<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
-      <td>${t.codigoAcessoHash ? '<span class="hint" style="margin:0;">🔒 Código gerado</span>' : '<span class="hint" style="margin:0;">Nenhum código gerado</span>'}</td>
+      <td>${statusHtml}</td>
       <td class="mono">${qtdInscritos}</td>
-      <td><button class="btn secondary small gerarCodigoAcesso">${t.codigoAcessoHash?'🔄 Gerar novo':'🔑 Gerar código'}</button></td></tr>`;
+      <td style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn secondary small gerarCodigoAcesso">${t.codigoAcessoHash?'🔄 Gerar novo':'🔑 Gerar código'}</button>
+        ${t.codigoAcessoCifrado ? `<button class="btn secondary small revelarCodigoAcesso" title="Pede sua senha de admin de novo, por segurança">👁 Revelar</button>` : ''}
+      </td></tr>`;
   }).join('') || '<tr><td colspan="4" class="hint">Nenhuma equipe cadastrada.</td></tr>';
   body.querySelectorAll('.gerarCodigoAcesso').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -4654,10 +4808,31 @@ function renderCodigosAcessoBody(){
         const teamAtual = STATE.teams.find(t=>t.id===teamId);
         if(!teamAtual){ showAlert('Essa Equipe não existe mais.'); return; }
         const codigoPlano = await definirCodigoAcessoEquipe(teamAtual);
+        // Além do hash de sempre (já gravado por definirCodigoAcessoEquipe, usado pro
+        // login da Equipe), tenta guardar também uma cópia CIFRADA com a senha de admin
+        // -- é só essa cópia extra que permite "Revelar" o código depois. Usa a senha já
+        // em memória desta sessão (ver adminSenhaEmMemoria) se disponível; se a sessão
+        // foi restaurada sem a senha ter sido digitada de novo, pede uma vez (fica em
+        // memória pro resto da sessão depois disso).
+        let cifrouComSucesso = false;
+        const teamParaCifrar = STATE.teams.find(t=>t.id===teamId); // busca de novo — o await acima pode ter cruzado com outra sincronização
+        if(teamParaCifrar){
+          let senhaParaCifrar = adminSenhaEmMemoria;
+          if(!senhaParaCifrar){
+            senhaParaCifrar = await pedirSenhaAdmin('Confirme sua senha', 'Pra deixar esse código revelável depois (caso a Equipe esqueça), confirme sua senha de admin uma vez. Se preferir não informar agora, o código ainda funciona normalmente — só não vai poder ser revelado de novo, apenas regerado.');
+          }
+          if(senhaParaCifrar){
+            const {cifrado, iv} = await cifrarCodigoAcesso(codigoPlano, senhaParaCifrar);
+            teamParaCifrar.codigoAcessoCifrado = cifrado;
+            teamParaCifrar.codigoAcessoCifradoIv = iv;
+            cifrouComSucesso = true;
+          }
+        }
+        markDirty();
         renderCodigosAcessoBody();
-        // A cópia automática só é tentada DEPOIS do cálculo do hash (definirCodigoAcessoEquipe
-        // acima) — em alguns navegadores, copiar pra área de transferência exige acontecer
-        // bem perto do gesto original do usuário (clique), e esse cálculo (rápido, mas
+        // A cópia automática só é tentada DEPOIS do cálculo do hash/cifra acima — em
+        // alguns navegadores, copiar pra área de transferência exige acontecer bem
+        // perto do gesto original do usuário (clique), e esse cálculo (rápido, mas
         // assíncrono) pode empurrar a chamada pra fora dessa janela, fazendo a cópia
         // falhar silenciosamente. Não é um problema de correção — o try/catch só marca
         // copiadoOk como true se a cópia REALMENTE deu certo, nunca informando sucesso
@@ -4667,12 +4842,44 @@ function renderCodigosAcessoBody(){
         if(navigator.clipboard && navigator.clipboard.writeText){
           try{ await navigator.clipboard.writeText(codigoPlano); copiadoOk = true; }catch(e){}
         }
-        showAlert(`Novo código de acesso para "${teamAtual.label}": ${codigoPlano}\n\n${copiadoOk?'Já copiado pra área de transferência.\n\n':''}Anote ou repasse agora — por segurança, esse código não fica salvo em texto puro em lugar nenhum, e não será possível vê-lo de novo depois de fechar este aviso (só gerar um código novo).`);
+        const avisoRevelar = cifrouComSucesso
+          ? 'Esse código pode ser revelado de novo depois, a qualquer momento, com o botão "👁 Revelar" (pede sua senha de admin de novo).'
+          : 'Anote ou repasse agora — esse código não fica salvo em texto puro em lugar nenhum, e não será possível vê-lo de novo depois de fechar este aviso (só gerar um código novo).';
+        showAlert(`Novo código de acesso para "${teamAtual.label}": ${codigoPlano}\n\n${copiadoOk?'Já copiado pra área de transferência.\n\n':''}${avisoRevelar}`);
       };
       if(team.codigoAcessoHash){
         showConfirm(`Gerar um novo código de acesso para "${team.label}"? O código atual para de funcionar imediatamente para quem tentar entrar com ele depois disso.`, gerar);
       } else {
         gerar();
+      }
+    });
+  });
+  body.querySelectorAll('.revelarCodigoAcesso').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const teamId = btn.closest('tr').dataset.team;
+      const team = STATE.teams.find(t=>t.id===teamId);
+      if(!team || !team.codigoAcessoCifrado) return;
+      // Sempre pede a senha de novo aqui, mesmo se já estiver em memória desta sessão —
+      // revelar um segredo já existente é mais sensível que só cifrar um novo, então
+      // merece essa reconfirmação extra (mesmo padrão de apps de senha/banco pra ações
+      // de "mostrar" um segredo).
+      const senha = await pedirSenhaAdmin('Confirme sua senha', `Pra revelar o código de acesso de "${team.label}", confirme sua senha de admin.`);
+      if(!senha) return; // cancelado
+      const teamAtual = STATE.teams.find(t=>t.id===teamId); // busca de novo — o prompt pode ter ficado aberto um tempo
+      if(!teamAtual || !teamAtual.codigoAcessoCifrado){ showAlert('Não foi possível revelar: o código dessa Equipe mudou ou foi removido enquanto o diálogo estava aberto.'); return; }
+      try{
+        const codigoPlano = await decifrarCodigoAcesso(teamAtual.codigoAcessoCifrado, teamAtual.codigoAcessoCifradoIv, senha);
+        let copiadoOk = false;
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          try{ await navigator.clipboard.writeText(codigoPlano); copiadoOk = true; }catch(e){}
+        }
+        showAlert(`Código de acesso de "${teamAtual.label}": ${codigoPlano}${copiadoOk?'\n\nJá copiado pra área de transferência.':''}`);
+      }catch(e){
+        // Só acontece se a senha de admin mudou desde que esse código foi cifrado (ver
+        // confirmChangePassword, que tenta re-cifrar automaticamente ao trocar a senha,
+        // mas pode falhar em casos raros) -- o login da Equipe com esse código continua
+        // funcionando normalmente, só a revelação que não é mais possível.
+        showAlert('Não foi possível revelar este código (pode ter sido cifrado com uma senha de admin anterior, já trocada). Gere um código novo para poder revelá-lo no futuro.');
       }
     });
   });
@@ -7179,6 +7386,7 @@ function showConfirm(message, onConfirm, onCancel){
    parar a câmera do leitor de QR) -- o mapa abaixo só aponta pra elas, nunca duplica
    nada nem fecha "na marra" tirando a classe .open diretamente. */
 const FECHAR_MODAL_POR_ID = {
+  adminSenhaPromptModal: closeAdminSenhaPromptModal,
   loginModal: closeLoginModal,
   changePasswordModal: closeChangePasswordModal,
   clearModal: closeClearModal,
@@ -9015,6 +9223,9 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('closeChangePasswordModal').addEventListener('click', closeChangePasswordModal);
   document.getElementById('cancelChangePasswordBtn').addEventListener('click', closeChangePasswordModal);
   document.getElementById('confirmChangePasswordBtn').addEventListener('click', confirmChangePassword);
+  document.getElementById('adminSenhaPromptConfirmBtn').addEventListener('click', confirmarAdminSenhaPrompt);
+  document.getElementById('adminSenhaPromptCancelBtn').addEventListener('click', closeAdminSenhaPromptModal);
+  document.getElementById('adminSenhaPromptInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmarAdminSenhaPrompt(); });
   document.getElementById('changePasswordModal').addEventListener('click', (e)=>{ if(e.target.id==='changePasswordModal') closeChangePasswordModal(); });
   document.getElementById('closeGtReagendarModal').addEventListener('click', closeGtReagendarModal);
   document.getElementById('cancelGtReagendarBtn').addEventListener('click', closeGtReagendarModal);
