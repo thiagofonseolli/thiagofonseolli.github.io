@@ -5625,7 +5625,7 @@ function renderInscritosBody(){
   body.innerHTML = list.map(a=>{
     const fotoUrl = imgGet(a.foto);
     return `<tr data-id="${a.id}">
-    <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
+    <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
     <td>${escPdf(a.nome)}</td><td>${teamChip(a.teamId, a.genero)}</td>
     <td>${a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'<span class="hint">—</span>'}</td>
     <td class="mono">${escPdf(a.codigo||'—')}</td>
@@ -8707,7 +8707,7 @@ function renderAcessoEquipeView(){
     <table><thead><tr><th>Foto</th><th>Nome</th><th>Gênero</th><th>Modalidades</th><th></th></tr></thead><tbody>
       ${inscritosDaEquipe.map(a=>{
         const fotoUrl = imgGet(a.foto);
-        return `<tr data-id="${a.id}"><td><button type="button" class="aeFotoThumbBtn" title="Adicionar/trocar foto" style="border:none; background:none; cursor:pointer; padding:0;">${fotoUrl ? `<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" style="width:34px; height:34px; border-radius:6px; object-fit:cover;">` : `<span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:6px; background:var(--bg); border:1px solid var(--border); font-size:15px;">📷</span>`}</button></td>
+        return `<tr data-id="${a.id}"><td><button type="button" class="aeFotoThumbBtn" title="Adicionar/trocar foto" style="border:none; background:none; cursor:pointer; padding:0;">${fotoUrl ? `<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" loading="lazy" style="width:34px; height:34px; border-radius:6px; object-fit:cover;">` : `<span style="display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:6px; background:var(--bg); border:1px solid var(--border); font-size:15px;">📷</span>`}</button></td>
         <td>${escPdf(a.nome)}</td><td>${a.genero==='F'?'Feminino':'Masculino'}</td>
         <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
         <td><button class="btn secondary small aeEditar">✏️ Editar</button> <button class="btn danger small aeRemove">✕ Remover</button></td></tr>`;
