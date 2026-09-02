@@ -3225,7 +3225,7 @@ function renderJogos(){
           return `<div style="margin-bottom:10px;">
             <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
             <div class="pill-group">
-              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
+              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" aria-label="Remover a variável ${escPdf(t.label)}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
             </div>
           </div>`;
         }).join('')}
@@ -3524,7 +3524,7 @@ function gameRowHtml(g){
         ${g.local ? `<span class="hint" style="margin:0;">📍 ${escPdf(g.local)}</span>` : ''}
         ${nLancamentos>0 ? `<span class="badge">${nLancamentos} lanç.</span>` : ''}
         <span class="badge ${done?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span>
-        ${isAdmin?'<button class="btn danger small removeGame" title="Remover partida">✕</button>':''}
+        ${isAdmin?'<button class="btn danger small removeGame" title="Remover partida" aria-label="Remover esta partida">✕</button>':''}
         <span class="expand-chevron">${expanded?'▾':'▸'}</span>
       </div>
     </div>
@@ -3700,7 +3700,7 @@ function renderGtRegraItem(r, posicao){
   return `<div class="row gt-regra-item" data-regra="${r.id}" style="align-items:center; margin-bottom:8px; gap:8px;">
     <span class="mono hint" style="margin:0; min-width:20px;">${posicao}.</span>
     <input type="text" class="gtRegraTexto" value="${escPdf(r.texto)}" style="flex:1;" ${adminDisabled()}>
-    ${isAdmin ? `<button class="btn danger small gtRemoveRegra" title="Remover regra">✕</button>` : ''}
+    ${isAdmin ? `<button class="btn danger small gtRemoveRegra" title="Remover regra" aria-label="Remover esta regra">✕</button>` : ''}
   </div>`;
 }
 function renderGtStep1(){
@@ -3788,7 +3788,7 @@ function renderGtLocalCard(local){
     <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border);">
       <label class="f-label" style="margin-bottom:6px; display:block;">Bloqueios de horário (ex.: almoço) — o gerador pula esses intervalos automaticamente</label>
       ${bloqueios.length ? `<div class="pill-group" style="margin-bottom:8px;">
-        ${bloqueios.map(b=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(b.inicio)}–${escPdf(b.fim)}${b.motivo?` (${escPdf(b.motivo)})`:''}<button class="danger gtRemoveBloqueio" data-bloqueio="${b.id}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
+        ${bloqueios.map(b=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(b.inicio)}–${escPdf(b.fim)}${b.motivo?` (${escPdf(b.motivo)})`:''}<button class="danger gtRemoveBloqueio" data-bloqueio="${b.id}" title="Remover bloqueio de horário" aria-label="Remover bloqueio de horário das ${escPdf(b.inicio)} às ${escPdf(b.fim)}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
       </div>` : ''}
       <div class="row">
         <div class="field"><label class="f-label">Início</label><input type="time" class="gtBloqueioInicio" style="width:110px;"></div>
@@ -4609,7 +4609,7 @@ function renderAglutinadoresList(){
         <strong>${escPdf(g.nome)}</strong> <span class="hint" style="margin:0;">(${nEquipes} equipe${nEquipes===1?'':'s'})</span>
         ${g.regras ? `<div class="hint" style="margin:2px 0 0; white-space:pre-wrap;">${escPdf(g.regras)}</div>` : ''}
       </div>
-      ${isAdmin ? `<button class="aglRemove" style="background:none; border:none; color:var(--crimson); cursor:pointer; font-weight:700;">✕</button>` : ''}
+      ${isAdmin ? `<button class="aglRemove" aria-label="Remover o aglutinador ${escPdf(g.nome)}" style="background:none; border:none; color:var(--crimson); cursor:pointer; font-weight:700;">✕</button>` : ''}
     </div>`;
   }).join('');
   wrap.querySelectorAll('.aglRemove').forEach(btn=>{
@@ -4755,7 +4755,7 @@ function renderTeamsBody(){
 }
 function renderModalidadesChips(){
   const el = document.getElementById('modalidadesChips');
-  el.innerHTML = STATE.modalidades.map(m=>`<span class="chip">${escPdf(m)} ${isAdmin?`<button data-mod="${escPdf(m)}" class="removeMod">✕</button>`:''}</span>`).join('');
+  el.innerHTML = STATE.modalidades.map(m=>`<span class="chip">${escPdf(m)} ${isAdmin?`<button data-mod="${escPdf(m)}" class="removeMod" aria-label="Remover a modalidade ${escPdf(m)}">✕</button>`:''}</span>`).join('');
   el.querySelectorAll('.removeMod').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const mod = btn.dataset.mod;
@@ -5313,7 +5313,7 @@ async function executarGeracaoCrachasLote(lista){
 </style>
 </head>
 <body>
-  <div class="grade">${imagens.map(src=>`<img src="${src}">`).join('')}</div>
+  <div class="grade">${imagens.map(src=>`<img src="${src}" alt="Crachá">`).join('')}</div>
 </body>
 </html>`;
 
@@ -7038,7 +7038,7 @@ function renderCheckinsBody(){
       <td>${inscrito?teamChip(inscrito.teamId, inscrito.genero):'—'}</td>
       <td class="mono">${dt.toLocaleDateString('pt-BR')}</td>
       <td class="mono">${dt.toLocaleTimeString('pt-BR')}</td>
-      <td>${isAdmin?'<button class="btn danger small removeCheckin">✕</button>':''}</td>
+      <td>${isAdmin?`<button class="btn danger small removeCheckin" aria-label="Remover check-in de ${inscrito?escPdf(inscrito.nome):'inscrito removido'}">✕</button>`:''}</td>
     </tr>`;
   }).join('');
   body.querySelectorAll('.removeCheckin').forEach(btn=>{
@@ -7172,6 +7172,50 @@ function showConfirm(message, onConfirm, onCancel){
     if(onConfirm) onConfirm();
   });
 }
+/* Fecha qualquer modal aberto no momento ao apertar Esc -- sem isso, quem navega só pelo
+   teclado não tinha como fechar nenhum modal sem encontrar visualmente um botão
+   "Fechar"/"Cancelar" e apertar Enter nele (ou pior, dar Tab várias vezes até chegar
+   lá). Cada modal já tem sua própria função de fechar (às vezes com lógica extra, como
+   parar a câmera do leitor de QR) -- o mapa abaixo só aponta pra elas, nunca duplica
+   nada nem fecha "na marra" tirando a classe .open diretamente. */
+const FECHAR_MODAL_POR_ID = {
+  loginModal: closeLoginModal,
+  changePasswordModal: closeChangePasswordModal,
+  clearModal: closeClearModal,
+  headerModal: closeHeaderModal,
+  tabOrderModal: closeTabOrderModal,
+  gradeDiaModal: closeGradeDiaModal,
+  gtReagendarModal: closeGtReagendarModal,
+  fotoModal: closeFotoModal,
+  crachaLogosModal: closeCrachaLogosModal,
+  crachaResultModal: closeCrachaResultModal,
+  editInscritoModal: closeEditInscritoModal,
+  editArtisticaModal: closeEditArtisticaModal,
+  importReviewModal: closeImportReviewModal,
+  feedingModal: closeFeedingModal,
+  qrScanModal: closeQrScanModal,
+  editalViewModal: closeEditalViewModal,
+  painelModal: closePainelModal,
+};
+/* genericAlertModal é reaproveitado tanto por showAlert() (só um botão "OK") quanto por
+   showConfirm() (dois botões) -- Esc precisa se comportar como "Cancelar" quando os dois
+   existem (nunca como "Confirmar": a ação por trás pode ser irreversível), e como "OK"
+   quando só há um alerta simples. */
+function fecharGenericAlertModalComEsc(){
+  const cancelBtn = document.getElementById('genericConfirmCancelBtn');
+  const okBtn = document.getElementById('genericAlertOkBtn');
+  if(cancelBtn) cancelBtn.click();
+  else if(okBtn) okBtn.click();
+}
+document.addEventListener('keydown', (e)=>{
+  if(e.key !== 'Escape') return;
+  const genericModal = document.getElementById('genericAlertModal');
+  if(genericModal && genericModal.classList.contains('open')){ fecharGenericAlertModalComEsc(); return; }
+  for(const [id, fechar] of Object.entries(FECHAR_MODAL_POR_ID)){
+    const el = document.getElementById(id);
+    if(el && el.classList.contains('open')){ fechar(); return; } // só o primeiro encontrado -- evita fechar mais de um de uma vez no caso raro de dois abertos ao mesmo tempo
+  }
+});
 
 function escPdf(str){
   return String(str==null?'':str).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -7406,7 +7450,7 @@ function buildGameDetailHtml(gameId){
       const teamId = ev.teamSide==='A'?game.teamA:game.teamB;
       return `<tr data-evid="${ev.id}"><td>${inscrito?escPdf(inscrito.nome):'Inscrito removido'}</td><td>${teamChip(teamId, game.genero)}</td><td>${escPdf(tipoInfo(ev.tipo, game.modalidade).label)}</td>
         <td class="mono">${new Date(ev.ts).toLocaleTimeString('pt-BR')}</td>
-        <td>${isAdmin?'<button class="btn danger small removeEvento">✕</button>':''}</td></tr>`;
+        <td>${isAdmin?`<button class="btn danger small removeEvento" aria-label="Remover lançamento de ${escPdf(tipoInfo(ev.tipo, game.modalidade).label)} de ${inscrito?escPdf(inscrito.nome):'inscrito removido'}">✕</button>`:''}</td></tr>`;
     }).join('') + `</tbody></table>`;
 
   function rosterHtml(inscritos, side){
@@ -8087,7 +8131,7 @@ function renderIndividualContentHtml(){
   return `<div class="card">
     <h2>Modalidades Individuais</h2>
     <p class="hint">Para cada colocação (1º, 2º, 3º...), escolha qual equipe a alcançou. Os pontos são calculados automaticamente conforme a posição, usando a tabela de pontuação configurada na seção "Regulamento" desta aba.</p>
-    <div class="pill-group" style="margin-bottom:8px;">${STATE.modalidadesIndividuais.map(m=>`<div class="pill ${indivModalidade===m.key?'active':''}" data-indivmod="${m.key}">${escPdf(m.label)}${isAdmin?` <button class="removeIndivMod" data-indivmodremove="${m.key}" title="Remover modalidade" style="margin-left:6px; background:none; border:none; color:inherit; cursor:pointer; font-weight:700; padding:0;">✕</button>`:''}</div>`).join('') || `<span class="hint">Nenhuma modalidade individual cadastrada.</span>`}</div>
+    <div class="pill-group" style="margin-bottom:8px;">${STATE.modalidadesIndividuais.map(m=>`<div class="pill ${indivModalidade===m.key?'active':''}" data-indivmod="${m.key}">${escPdf(m.label)}${isAdmin?` <button class="removeIndivMod" data-indivmodremove="${m.key}" title="Remover modalidade" aria-label="Remover a modalidade ${escPdf(m.label)}" style="margin-left:6px; background:none; border:none; color:inherit; cursor:pointer; font-weight:700; padding:0;">✕</button>`:''}</div>`).join('') || `<span class="hint">Nenhuma modalidade individual cadastrada.</span>`}</div>
     ${isAdmin ? `<div class="row" style="align-items:flex-end; margin-top:10px;">
       <div class="field"><label class="f-label">Nova modalidade individual</label><input type="text" id="nmIndivName" placeholder="Ex.: Tênis de Mesa" style="width:200px;"></div>
       <div class="field"><label class="f-label">Como pontuar</label>
@@ -8216,7 +8260,7 @@ function renderDesfileContentHtml(){
     <h2 style="font-size:15px;">Jurados</h2>
     <p class="hint">Cadastre quem vai avaliar o desfile. Cada jurado lança seus próprios votos, separadamente.</p>
     ${total ? `<div class="pill-group" style="margin-bottom:10px;">
-      ${STATE.desfileJurados.map(j=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(j.nome)}<button class="danger removeDesfileJurado" data-jurado="${j.id}" title="Remover este jurado" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
+      ${STATE.desfileJurados.map(j=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px;">${escPdf(j.nome)}<button class="danger removeDesfileJurado" data-jurado="${j.id}" title="Remover este jurado" aria-label="Remover o jurado ${escPdf(j.nome)}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button></span>`).join('')}
     </div>` : ''}
     <div class="row">
       <div class="field"><label class="f-label">Nome do jurado</label><input type="text" id="desfileNovoJuradoNome" placeholder="Ex.: Professora Ana" style="width:220px;"></div>
