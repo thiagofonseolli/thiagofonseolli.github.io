@@ -4,9 +4,22 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>JIM 2026 — Painel de Gestão</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
+  /* Fontes hospedadas no próprio repositório (./fonts/) em vez de buscadas do Google a
+     cada visita -- ver PROJETO.md pra detalhes do porquê (LGPD: evita mandar IP/dados do
+     navegador do visitante pro Google sem consentimento; e performance: uma conexão a
+     menos, útil numa rede de escola instável). font-display:swap (igual o Google Fonts já
+     entregava) evita texto invisível enquanto a fonte carrega -- mostra a fonte padrão do
+     sistema primeiro, troca suavemente quando a fonte baixar. */
+  @font-face{ font-family:'Oswald'; font-style:normal; font-weight:500; font-display:swap; src:url('./fonts/oswald-500.woff2') format('woff2'); }
+  @font-face{ font-family:'Oswald'; font-style:normal; font-weight:600; font-display:swap; src:url('./fonts/oswald-600.woff2') format('woff2'); }
+  @font-face{ font-family:'Oswald'; font-style:normal; font-weight:700; font-display:swap; src:url('./fonts/oswald-700.woff2') format('woff2'); }
+  @font-face{ font-family:'Inter'; font-style:normal; font-weight:400; font-display:swap; src:url('./fonts/inter-400.woff2') format('woff2'); }
+  @font-face{ font-family:'Inter'; font-style:normal; font-weight:500; font-display:swap; src:url('./fonts/inter-500.woff2') format('woff2'); }
+  @font-face{ font-family:'Inter'; font-style:normal; font-weight:600; font-display:swap; src:url('./fonts/inter-600.woff2') format('woff2'); }
+  @font-face{ font-family:'Inter'; font-style:normal; font-weight:700; font-display:swap; src:url('./fonts/inter-700.woff2') format('woff2'); }
+  @font-face{ font-family:'Space Mono'; font-style:normal; font-weight:400; font-display:swap; src:url('./fonts/space-mono-400.woff2') format('woff2'); }
+  @font-face{ font-family:'Space Mono'; font-style:normal; font-weight:700; font-display:swap; src:url('./fonts/space-mono-700.woff2') format('woff2'); }
   :root{
     --navy:#12213F; --navy-light:#1C2F52; --green:#0E5C3B; --gold:#FFB627;
     --crimson:#D62839; --bg:#F1F3F6; --card:#FFFFFF; --text:#152033; --muted:#5B6B82; --border:#DDE3EC;
