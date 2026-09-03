@@ -5831,13 +5831,23 @@ function renderInscritosBody(){
   if(list.length===0){ body.innerHTML = `<tr><td colspan="11" class="hint">Nenhum inscrito encontrado com esses filtros.</td></tr>`; return; }
   body.innerHTML = list.map(a=>{
     const fotoUrl = imgGet(a.foto);
+    // Dado de saúde (LGPD Art. 5º/11 -- dado pessoal sensível): só quem realmente
+    // precisa (admin, ou o representante da própria Equipe do inscrito) vê o detalhe.
+    // Um visitante sem login (a aba Inscrições em si é pública, pra permitir conferir
+    // nome/equipe/código) não via isso ser bloqueado antes desta correção -- via a
+    // descrição específica de alergia/restrição de qualquer inscrito, sem login nenhum.
+    const podeVerSaude = isAdmin || (accessoEquipeId && accessoEquipeId===a.teamId);
+    const restricaoHtml = !a.restricaoAlimentar ? '<span class="hint">Não</span>'
+      : podeVerSaude ? `🍽️ ${escPdf(a.restricoesAlimentares)}` : '<span class="hint" title="Visível só pro admin ou representante desta Equipe">🍽️ Não exibido</span>';
+    const alergiaHtml = !a.alergiaMedicamento ? '<span class="hint">Não</span>'
+      : podeVerSaude ? `🏥 ${escPdf(a.alergias)}` : '<span class="hint" title="Visível só pro admin ou representante desta Equipe">🏥 Não exibido</span>';
     return `<tr data-id="${a.id}">
     <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
     <td>${escPdf(a.nome)}</td><td>${teamChip(a.teamId, a.genero)}</td>
     <td>${a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'<span class="hint">—</span>'}</td>
     <td class="mono">${escPdf(a.codigo||'—')}</td>
-    <td>${a.restricaoAlimentar ? `🍽️ ${escPdf(a.restricoesAlimentares)}` : '<span class="hint">Não</span>'}</td>
-    <td>${a.alergiaMedicamento ? `🏥 ${escPdf(a.alergias)}` : '<span class="hint">Não</span>'}</td>
+    <td>${restricaoHtml}</td>
+    <td>${alergiaHtml}</td>
     <td>${(a.modalidades||[]).map(m=>`<span class="chip">${escPdf(modLabel(m))}</span>`).join('') || '<span class="hint">—</span>'}</td>
     <td><button class="btn secondary small gerarCrachaBtn">🪪 Gerar crachá</button></td>
     <td><button class="btn secondary small editInscritoBtn" ${adminDisabled()}>✏️ Editar</button></td>
@@ -7664,8 +7674,14 @@ function buildGameDetailHtml(gameId){
   function rosterHtml(inscritos, side){
     if(inscritos.length===0) return `<p class="hint">Nenhum inscrito cadastrado nesta modalidade/gênero para esta equipe. Cadastre em "Inscritos".</p>`;
     return inscritos.map(a=>{
-      const alergiaTag = a.alergiaMedicamento ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
-      const restricaoTag = a.restricaoAlimentar ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
+      // Dado de saúde (LGPD Art. 5º/11 -- dado pessoal sensível): a aba Jogos é pública
+      // (qualquer visitante vê o placar/escalação sem login), então só quem realmente
+      // precisa (admin, ou o representante da própria Equipe do inscrito) vê o detalhe
+      // de alergia/restrição -- antes desta correção, qualquer visitante via isso ao
+      // abrir o detalhe de um jogo.
+      const podeVerSaude = isAdmin || (accessoEquipeId && accessoEquipeId===a.teamId);
+      const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
+      const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
       return `<div class="game-card" data-inscrito="${a.id}" data-side="${side}">
       <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
       <div class="pill-group">
