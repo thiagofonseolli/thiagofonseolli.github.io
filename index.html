@@ -345,6 +345,7 @@
     <h2 style="color:var(--navy); margin-top:0;">🔒 Solicitações de privacidade (LGPD)</h2>
     <p class="hint">Pedidos de acesso, correção ou exclusão de dados recebidos pelo formulário público. Marcar como atendida não apaga nada sozinho -- a exclusão em si continua sendo feita normalmente na aba Inscrições, com o botão "Remover".</p>
     <div id="solicitacoesPrivacidadeBody"></div>
+    <button id="btnApagarSolicitacoesAtendidas" class="btn secondary small" style="margin-top:8px;">🗑️ Apagar solicitações já atendidas</button>
     <h2 style="color:var(--navy); margin-top:26px; padding-top:16px; border-top:1px solid var(--border);">📋 Registro de operações (LGPD Art. 37)</h2>
     <p class="hint">Registro das operações de tratamento de dado pessoal mais relevantes -- não cada clique ou visualização, só criar/remover inscrito, exportar backup, login de admin, e solicitações de privacidade atendidas. Serve como histórico auditável, não pode ser editado nem apagado por aqui.</p>
     <div id="registroOperacoesBody" style="max-height:320px; overflow-y:auto;"></div>
@@ -3024,11 +3025,27 @@ function renderSolicitacoesPrivacidadeBody(){
     });
   });
 }
+/* Limpeza pontual da própria fila de solicitações -- ela guarda nome e contato de quem
+   pediu (dado pessoal), então também não faz sentido acumular pra sempre depois que um
+   pedido já foi resolvido. Só apaga as marcadas como "atendida" -- nunca uma pendente,
+   pra não perder o rastro de um pedido ainda em aberto. */
+function apagarSolicitacoesAtendidas(){
+  if(!isAdmin) return;
+  const qtd = STATE.solicitacoesPrivacidade.filter(s=>s.atendida).length;
+  if(qtd===0){ showAlert('Nenhuma solicitação já atendida pra apagar no momento.'); return; }
+  showConfirm(`Apagar ${qtd} solicitação${qtd>1?'ões':''} já atendida${qtd>1?'s':''}? O contato de quem pediu não fica mais guardado depois disso. Essa ação não pode ser desfeita.`, ()=>{
+    STATE.solicitacoesPrivacidade = STATE.solicitacoesPrivacidade.filter(s=>!s.atendida);
+    registrarOperacao('solicitacoes_privacidade_limpas', `${qtd} solicitação${qtd>1?'ões':''} de privacidade já atendida${qtd>1?'s':''} apagada${qtd>1?'s':''}`);
+    markDirty();
+    renderSolicitacoesPrivacidadeBody();
+  });
+}
 
 const REGISTRO_OPERACAO_LABEL = {
   login_admin: 'Login de admin', inscrito_criado: 'Inscrito criado', inscrito_criado_lote: 'Inscritos criados (lote)',
   inscrito_removido: 'Inscrito removido', backup_exportado: 'Backup exportado',
   solicitacao_privacidade_atendida: 'Solicitação de privacidade atendida', eliminacao_dados_sensiveis: 'Dados sensíveis eliminados (retenção)',
+  solicitacoes_privacidade_limpas: 'Solicitações de privacidade antigas apagadas',
 };
 function renderRegistroOperacoesBody(){
   const body = document.getElementById('registroOperacoesBody');
@@ -9664,6 +9681,7 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('spEnviarBtn').addEventListener('click', enviarSolicitacaoPrivacidade);
   document.getElementById('btnSolicitacoesPrivacidade').addEventListener('click', abrirSolicitacoesPrivacidadeModal);
   document.getElementById('closeSolicitacoesPrivacidadeModal').addEventListener('click', fecharSolicitacoesPrivacidadeModal);
+  document.getElementById('btnApagarSolicitacoesAtendidas').addEventListener('click', apagarSolicitacoesAtendidas);
   document.getElementById('btnEliminarDadosSensiveis').addEventListener('click', iniciarEliminarDadosSensiveis);
   document.getElementById('btnEditarAvisoPrivacidade').addEventListener('click', abrirEditarAvisoPrivacidadeModal);
   document.getElementById('closeEditarAvisoPrivacidadeModal').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
