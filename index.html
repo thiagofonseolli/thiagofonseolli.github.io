@@ -209,6 +209,7 @@
       <span class="save-status" id="saveStatus" role="status">Carregando…</span>
       <button id="btnImagensPendentes" style="display:none;" title="Fotos/logos que falharam ao enviar para a nuvem -- clique para ver quais e reenviar">⚠ Imagens não sincronizadas</button>
       <button class="primary" id="btnSave">💾 Salvar</button>
+      <button id="btnSolicitarPrivacidade" title="Solicitar acesso, correção ou exclusão dos seus dados, nos termos da LGPD" style="background:none; border:none; color:var(--muted); text-decoration:underline; cursor:pointer; font-size:12px; padding:4px 6px;">🔒 Privacidade / meus dados</button>
       <button id="btnAdmin">🔒 Login Administrador</button>
       <div class="dropdown-wrap" id="moreOptionsWrap">
         <button id="btnMoreOptions">⋯ Mais opções</button>
@@ -222,6 +223,7 @@
           <button id="btnEditHeader" style="display:none;">🖼️ Editar cabeçalho</button>
           <button id="btnOrganizarAbas" style="display:none;">🗂️ Organizar abas</button>
           <button id="btnClearData" style="display:none;">🧹 Limpar dados</button>
+          <button id="btnSolicitacoesPrivacidade" style="display:none;">🔒 Solicitações de privacidade (LGPD)</button>
         </div>
       </div>
     </div>
@@ -301,6 +303,42 @@
       <button class="btn secondary" id="adminSenhaPromptCancelBtn">Cancelar</button>
       <button class="btn" id="adminSenhaPromptConfirmBtn">Confirmar</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="solicitarPrivacidadeModal">
+  <div class="modal-box" style="max-width:480px;">
+    <button class="modal-close" id="closeSolicitarPrivacidadeModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">🔒 Privacidade / meus dados</h2>
+    <p class="hint">Use este formulário para pedir acesso, correção ou exclusão dos dados de um(a) inscrito(a), nos termos da Lei Geral de Proteção de Dados (LGPD). A escola vai analisar o pedido e entrar em contato pelo canal informado abaixo.</p>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">O que você deseja?</label>
+      <select id="spTipo" style="width:100%;">
+        <option value="exclusao">Excluir os dados</option>
+        <option value="correcao">Corrigir algum dado</option>
+        <option value="acesso">Saber quais dados existem</option>
+        <option value="outro">Outro</option>
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Nome do(a) inscrito(a)</label><input type="text" id="spInscritoNome" style="width:100%;" placeholder="Nome completo"></div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Código do(a) inscrito(a) (se souber)</label><input type="text" id="spInscritoCodigo" style="width:100%;" placeholder="Ex.: a3b7c1d9"></div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Equipe (se souber)</label><input type="text" id="spEquipe" style="width:100%;" placeholder="Ex.: Equipe Fênix"></div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Seu nome</label><input type="text" id="spSolicitanteNome" style="width:100%;" placeholder="Nome de quem está pedindo (responsável, ou o(a) próprio(a) inscrito(a) se maior de idade)"></div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Contato para retorno (e-mail ou telefone)</label><input type="text" id="spContato" style="width:100%;" placeholder="Como a escola pode te responder"></div>
+    <div class="field" style="margin-bottom:10px;"><label class="f-label">Detalhes</label><textarea id="spDetalhes" rows="3" style="width:100%;" placeholder="Descreva o pedido"></textarea></div>
+    <p id="spMsg" style="font-size:12.5px; display:none;"></p>
+    <div class="modal-actions">
+      <button class="btn secondary" id="closeSolicitarPrivacidadeModal2">Cancelar</button>
+      <button class="btn" id="spEnviarBtn">Enviar solicitação</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="solicitacoesPrivacidadeModal">
+  <div class="modal-box" style="max-width:760px;">
+    <button class="modal-close" id="closeSolicitacoesPrivacidadeModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">🔒 Solicitações de privacidade (LGPD)</h2>
+    <p class="hint">Pedidos de acesso, correção ou exclusão de dados recebidos pelo formulário público. Marcar como atendida não apaga nada sozinho -- a exclusão em si continua sendo feita normalmente na aba Inscrições, com o botão "Remover".</p>
+    <div id="solicitacoesPrivacidadeBody"></div>
   </div>
 </div>
 
@@ -931,6 +969,11 @@ async function defaultState(){
     criteriosPersonalizados: [],
     geradorTabela: defaultGeradorTabela(),
     aglutinadores: [],
+    // Solicitações de acesso/correção/exclusão de dados (LGPD Art. 18) -- ver
+    // abrirSolicitacaoPrivacidadeModal()/renderSolicitacoesPrivacidadeBody(). Fica
+    // visível só pro admin (as solicitações em si podem conter contato pessoal de quem
+    // pediu); qualquer visitante consegue REGISTRAR uma, sem precisar de login.
+    solicitacoesPrivacidade: [],
     tabOrder: TABS.map(t=>t.id),
     crachaLogos: {logo1:null, logo2:null},
     crachaConfig: defaultCrachaConfig(),
@@ -1420,6 +1463,10 @@ async function ensureDefaults(s){
     else if(!aglutinadorIds.has(t.aglutinadorId)) t.aglutinadorId = null;
   });
   if(!s.imagensPendentesUpload || typeof s.imagensPendentesUpload !== 'object') s.imagensPendentesUpload = {};
+  if(!Array.isArray(s.solicitacoesPrivacidade)) s.solicitacoesPrivacidade = [];
+  s.solicitacoesPrivacidade.forEach(sp=>{
+    if(typeof sp.atendida !== 'boolean') sp.atendida = false;
+  });
   return s;
 }
 
@@ -1973,6 +2020,7 @@ const SYNC_COLECOES = {
   geradorRegras:           { lista: ()=> STATE.geradorTabela.regras,    idField: 'id' },
   checkins:                { lista: ()=> STATE.checkins,                idField: 'id' },
   games:                   { lista: ()=> STATE.games,                  idField: 'id' },
+  solicitacoesPrivacidade: { lista: ()=> STATE.solicitacoesPrivacidade, idField: 'id' },
   inscritos:               {
     lista: ()=> STATE.inscritos, idField: 'id',
     // a foto do inscrito sincroniza à parte (tabela "inscrito_foto", ver mais abaixo) —
@@ -2798,6 +2846,89 @@ async function confirmChangePassword(){
   ['cpAtual','cpNova1','cpNova2'].forEach(id=> document.getElementById(id).value='');
 }
 
+/* ===================== SOLICITAÇÕES DE PRIVACIDADE (LGPD Art. 18) =====================
+   Como não existe login de responsável/titular no app (só visitante, admin e
+   representante de Equipe), uma exclusão automática e sem verificação seria um risco
+   novo: qualquer um poderia se passar por outra pessoa e apagar o cadastro de um colega.
+   Por isso, o formulário público abaixo REGISTRA um pedido (visível só pro admin, que
+   pode conter contato pessoal de quem pediu) -- não apaga nada sozinho. A exclusão em si
+   continua sendo feita manualmente pelo admin (botão "Remover" já existente na aba
+   Inscrições, ver removeInscrito), depois de confirmar que o pedido é legítimo. */
+function abrirSolicitarPrivacidadeModal(){
+  ['spTipo','spInscritoNome','spInscritoCodigo','spEquipe','spSolicitanteNome','spContato','spDetalhes'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.value = id==='spTipo' ? 'exclusao' : '';
+  });
+  document.getElementById('spMsg').style.display = 'none';
+  document.getElementById('solicitarPrivacidadeModal').classList.add('open');
+}
+function fecharSolicitarPrivacidadeModal(){
+  document.getElementById('solicitarPrivacidadeModal').classList.remove('open');
+}
+function enviarSolicitacaoPrivacidade(){
+  const msg = document.getElementById('spMsg');
+  const tipo = document.getElementById('spTipo').value;
+  const inscritoNome = document.getElementById('spInscritoNome').value.trim();
+  const inscritoCodigo = document.getElementById('spInscritoCodigo').value.trim();
+  const equipe = document.getElementById('spEquipe').value.trim();
+  const solicitanteNome = document.getElementById('spSolicitanteNome').value.trim();
+  const contato = document.getElementById('spContato').value.trim();
+  const detalhes = document.getElementById('spDetalhes').value.trim();
+  msg.style.display = 'block';
+  msg.style.color = 'var(--crimson)';
+  if(!inscritoNome){ msg.textContent = 'Informe o nome do(a) inscrito(a).'; return; }
+  if(!solicitanteNome){ msg.textContent = 'Informe seu nome.'; return; }
+  if(!contato){ msg.textContent = 'Informe um contato (e-mail ou telefone) para a escola te responder.'; return; }
+  STATE.solicitacoesPrivacidade.push({
+    id: nextSolicitacaoPrivacidadeId(), tipo, inscritoNome, inscritoCodigo, equipe,
+    solicitanteNome, contato, detalhes, criadoEm: new Date().toISOString(), atendida: false,
+  });
+  markDirty();
+  fecharSolicitarPrivacidadeModal();
+  showAlert('Solicitação registrada. A escola vai analisar e entrar em contato pelo canal informado.');
+}
+function abrirSolicitacoesPrivacidadeModal(){
+  if(!isAdmin) return;
+  renderSolicitacoesPrivacidadeBody();
+  document.getElementById('solicitacoesPrivacidadeModal').classList.add('open');
+}
+function fecharSolicitacoesPrivacidadeModal(){
+  document.getElementById('solicitacoesPrivacidadeModal').classList.remove('open');
+}
+const SP_TIPO_LABEL = {exclusao:'Excluir dados', correcao:'Corrigir dado', acesso:'Saber quais dados existem', outro:'Outro'};
+function renderSolicitacoesPrivacidadeBody(){
+  const body = document.getElementById('solicitacoesPrivacidadeBody');
+  if(!body) return;
+  const lista = STATE.solicitacoesPrivacidade.slice().sort((a,b)=>{
+    if(a.atendida !== b.atendida) return a.atendida ? 1 : -1; // pendentes primeiro
+    return new Date(b.criadoEm) - new Date(a.criadoEm); // mais recente primeiro dentro de cada grupo
+  });
+  if(lista.length===0){ body.innerHTML = '<p class="hint">Nenhuma solicitação recebida ainda.</p>'; return; }
+  body.innerHTML = `<table><thead><tr><th>Quando</th><th>Tipo</th><th>Inscrito(a)</th><th>Quem pediu</th><th>Contato</th><th>Detalhes</th><th>Status</th><th></th></tr></thead><tbody>
+    ${lista.map(sp=>`<tr data-id="${sp.id}" style="${sp.atendida?'opacity:0.6;':''}">
+      <td class="mono">${new Date(sp.criadoEm).toLocaleString('pt-BR')}</td>
+      <td>${escPdf(SP_TIPO_LABEL[sp.tipo]||sp.tipo)}</td>
+      <td>${escPdf(sp.inscritoNome)}${sp.inscritoCodigo?` <span class="hint">(${escPdf(sp.inscritoCodigo)})</span>`:''}${sp.equipe?`<br><span class="hint">${escPdf(sp.equipe)}</span>`:''}</td>
+      <td>${escPdf(sp.solicitanteNome)}</td>
+      <td>${escPdf(sp.contato)}</td>
+      <td>${escPdf(sp.detalhes||'—')}</td>
+      <td>${sp.atendida?'✅ Atendida':'⏳ Pendente'}</td>
+      <td><button class="btn secondary small toggleSolicitacaoAtendida">${sp.atendida?'Reabrir':'Marcar como atendida'}</button></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+  body.querySelectorAll('.toggleSolicitacaoAtendida').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = Number(btn.closest('tr').dataset.id);
+      const sp = STATE.solicitacoesPrivacidade.find(x=>x.id===id);
+      if(!sp) return;
+      sp.atendida = !sp.atendida;
+      markDirty();
+      renderSolicitacoesPrivacidadeBody();
+    });
+  });
+}
+
+
 /* ===================== LIMPAR DADOS ===================== */
 function openClearModal(){
   if(!isAdmin) return;
@@ -3033,6 +3164,12 @@ function renderHeaderBlock(){
   if(exportBtn) exportBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const importBtn = document.getElementById('btnImport');
   if(importBtn) importBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  const solicitacoesBtn = document.getElementById('btnSolicitacoesPrivacidade');
+  if(solicitacoesBtn){
+    solicitacoesBtn.style.display = isAdmin ? 'inline-block' : 'none';
+    const pendentes = (STATE.solicitacoesPrivacidade||[]).filter(s=>!s.atendida).length;
+    solicitacoesBtn.textContent = pendentes>0 ? `🔒 Solicitações de privacidade (LGPD) — ${pendentes} pendente${pendentes>1?'s':''}` : '🔒 Solicitações de privacidade (LGPD)';
+  }
   const adminDivider = document.getElementById('adminOnlyDivider');
   if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
   // "💾 Salvar" só faz algo quando isAdmin ou accessoEquipeId (ver o clique, mais abaixo
@@ -4758,6 +4895,11 @@ function bindModalidadesContentEvents(){
 /* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
 function nextAglutinadorId(){
   const maiorAtual = STATE.aglutinadores.reduce((m,g)=>Math.max(m,g.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
+}
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
+function nextSolicitacaoPrivacidadeId(){
+  const maiorAtual = STATE.solicitacoesPrivacidade.reduce((m,s)=>Math.max(m,s.id),0);
   return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
 function renderAglutinadoresList(){
@@ -7460,6 +7602,8 @@ const FECHAR_MODAL_POR_ID = {
   qrScanModal: closeQrScanModal,
   editalViewModal: closeEditalViewModal,
   painelModal: closePainelModal,
+  solicitarPrivacidadeModal: fecharSolicitarPrivacidadeModal,
+  solicitacoesPrivacidadeModal: fecharSolicitacoesPrivacidadeModal,
 };
 /* genericAlertModal é reaproveitado tanto por showAlert() (só um botão "OK") quanto por
    showConfirm() (dois botões) -- Esc precisa se comportar como "Cancelar" quando os dois
@@ -9328,6 +9472,12 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('cancelClearBtn').addEventListener('click', closeClearModal);
   document.getElementById('confirmClearBtn').addEventListener('click', confirmClearData);
   document.getElementById('clearPassword').addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmClearData(); });
+  document.getElementById('btnSolicitarPrivacidade').addEventListener('click', abrirSolicitarPrivacidadeModal);
+  document.getElementById('closeSolicitarPrivacidadeModal').addEventListener('click', fecharSolicitarPrivacidadeModal);
+  document.getElementById('closeSolicitarPrivacidadeModal2').addEventListener('click', fecharSolicitarPrivacidadeModal);
+  document.getElementById('spEnviarBtn').addEventListener('click', enviarSolicitacaoPrivacidade);
+  document.getElementById('btnSolicitacoesPrivacidade').addEventListener('click', abrirSolicitacoesPrivacidadeModal);
+  document.getElementById('closeSolicitacoesPrivacidadeModal').addEventListener('click', fecharSolicitacoesPrivacidadeModal);
   document.getElementById('clearModal').addEventListener('click', (e)=>{ if(e.target.id==='clearModal') closeClearModal(); });
   document.getElementById('closeFeedingModal').addEventListener('click', closeFeedingModal);
   document.getElementById('closeFeedingModal2').addEventListener('click', closeFeedingModal);
