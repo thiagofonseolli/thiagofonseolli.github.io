@@ -224,6 +224,7 @@
           <button id="btnOrganizarAbas" style="display:none;">🗂️ Organizar abas</button>
           <button id="btnClearData" style="display:none;">🧹 Limpar dados</button>
           <button id="btnSolicitacoesPrivacidade" style="display:none;">🔒 Solicitações de privacidade (LGPD)</button>
+          <button id="btnEliminarDadosSensiveis" style="display:none;">🗑️ Eliminar dados de saúde e fotos (LGPD)</button>
         </div>
       </div>
     </div>
@@ -311,6 +312,11 @@
     <button class="modal-close" id="closeSolicitarPrivacidadeModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">🔒 Privacidade / meus dados</h2>
     <p class="hint">Use este formulário para pedir acesso, correção ou exclusão dos dados de um(a) inscrito(a), nos termos da Lei Geral de Proteção de Dados (LGPD). A escola vai analisar o pedido e entrar em contato pelo canal informado abaixo.</p>
+    <details style="margin-bottom:14px; border:1px solid var(--border); border-radius:6px; padding:8px 12px;">
+      <summary style="cursor:pointer; font-weight:600; font-size:13.5px;">📄 Ver aviso de privacidade completo</summary>
+      <div id="avisoPrivacidadeConteudo" style="font-size:13px; margin-top:8px; max-height:280px; overflow-y:auto;"></div>
+      <button id="btnEditarAvisoPrivacidade" style="display:none; margin-top:8px;" class="btn secondary small">✏️ Editar aviso de privacidade</button>
+    </details>
     <div class="field" style="margin-bottom:10px;"><label class="f-label">O que você deseja?</label>
       <select id="spTipo" style="width:100%;">
         <option value="exclusao">Excluir os dados</option>
@@ -334,11 +340,27 @@
 </div>
 
 <div class="modal-overlay" id="solicitacoesPrivacidadeModal">
-  <div class="modal-box" style="max-width:760px;">
+  <div class="modal-box" style="max-width:900px;">
     <button class="modal-close" id="closeSolicitacoesPrivacidadeModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">🔒 Solicitações de privacidade (LGPD)</h2>
     <p class="hint">Pedidos de acesso, correção ou exclusão de dados recebidos pelo formulário público. Marcar como atendida não apaga nada sozinho -- a exclusão em si continua sendo feita normalmente na aba Inscrições, com o botão "Remover".</p>
     <div id="solicitacoesPrivacidadeBody"></div>
+    <h2 style="color:var(--navy); margin-top:26px; padding-top:16px; border-top:1px solid var(--border);">📋 Registro de operações (LGPD Art. 37)</h2>
+    <p class="hint">Registro das operações de tratamento de dado pessoal mais relevantes -- não cada clique ou visualização, só criar/remover inscrito, exportar backup, login de admin, e solicitações de privacidade atendidas. Serve como histórico auditável, não pode ser editado nem apagado por aqui.</p>
+    <div id="registroOperacoesBody" style="max-height:320px; overflow-y:auto;"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editarAvisoPrivacidadeModal">
+  <div class="modal-box" style="max-width:560px;">
+    <button class="modal-close" id="closeEditarAvisoPrivacidadeModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">✏️ Editar aviso de privacidade</h2>
+    <p class="hint">Escreva normalmente, sem precisar de comandos HTML -- uma linha em branco separa parágrafos, e uma linha começando com "-" vira um item de lista. Preencha os trechos marcados "[PREENCHER]" com as informações da escola (prazo de retenção, contato do encarregado etc.).</p>
+    <textarea id="avisoPrivacidadeTextarea" rows="16" style="width:100%; font-family:inherit; font-size:13px; padding:8px; border:1px solid var(--border); border-radius:5px;"></textarea>
+    <div class="modal-actions">
+      <button class="btn secondary" id="cancelarEditarAvisoPrivacidadeBtn">Cancelar</button>
+      <button class="btn" id="salvarAvisoPrivacidadeBtn">Salvar</button>
+    </div>
   </div>
 </div>
 
@@ -974,10 +996,18 @@ async function defaultState(){
     // visível só pro admin (as solicitações em si podem conter contato pessoal de quem
     // pediu); qualquer visitante consegue REGISTRAR uma, sem precisar de login.
     solicitacoesPrivacidade: [],
+    // Registro de operações de tratamento de dado pessoal (LGPD Art. 37) -- só as
+    // operações mais relevantes (criar/remover inscrito, exportar backup, login de
+    // admin, atender solicitação de privacidade), não CADA clique/visualização, que
+    // inflaria isso sem necessidade real. Ver registrarOperacao(). Cresce sem limite de
+    // tamanho por enquanto -- aceitável na escala de um torneio por temporada, mas vale
+    // revisar se algum dia isso virar um problema de peso de sincronização.
+    registroOperacoes: [],
     tabOrder: TABS.map(t=>t.id),
     crachaLogos: {logo1:null, logo2:null},
     crachaConfig: defaultCrachaConfig(),
     editalHtml: await getDefaultEditalHtml(),
+    avisoPrivacidadeHtml: editalPlainTextToHtml(AVISO_PRIVACIDADE_PADRAO_TEXTO),
     // Referências de imagem (foto de inscrito, logo) cujo upload pro Supabase Storage
     // ainda não foi confirmado com sucesso — sincronizado entre dispositivos (ver
     // SYNC_TABELAS_ESPECIAIS) só pra TORNAR VISÍVEL o problema em qualquer tela de
@@ -1033,6 +1063,42 @@ async function getDefaultEditalHtml(){
     .replace('<p>• W.O = 0 ponto.</p>', '<p>• W.O = {{PTS_WO}} ponto.</p>')
     .replace('A = 5 B = 4 C = 3 D = 2 E = 0', 'A = {{FP_A}} B = {{FP_B}} C = {{FP_C}} D = {{FP_D}} E = {{FP_E}}');
 }
+
+/* Texto padrão do Aviso de Privacidade (LGPD) -- rascunho geral, com trechos marcados
+   [PREENCHER] pra escola completar com informações que só ela sabe (prazo de retenção,
+   contato do encarregado). Convertido pra HTML seguro (editalPlainTextToHtml, mesma
+   função já usada no Edital -- escapa cada linha antes de virar <p>/<li>) uma única vez,
+   na criação do STATE (ver defaultState()). Editável depois pelo admin (mesmo texto
+   simples, sem precisar mexer em HTML), ver abrirEditarAvisoPrivacidadeModal(). */
+const AVISO_PRIVACIDADE_PADRAO_TEXTO = `Este aviso explica, de forma resumida, como os dados cadastrados neste aplicativo são usados, nos termos da Lei Geral de Proteção de Dados (LGPD, Lei 13.709/2018).
+
+QUAIS DADOS COLETAMOS
+- Nome, Equipe, modalidades e código de identificação do(a) inscrito(a)
+- Foto (para o crachá de identificação)
+- Informações de saúde, quando informadas: restrição alimentar e alergia a medicamento
+
+PARA QUE USAMOS
+- Organizar a participação nas modalidades esportivas
+- Gerar o crachá de identificação
+- Garantir a segurança durante a alimentação do evento, evitando servir algo que cause alergia ou reação
+- Calcular e divulgar resultados e classificação
+
+QUEM TEM ACESSO
+- A administração do torneio
+- O(a) representante da própria Equipe do(a) inscrito(a)
+- Visitantes do site veem só nome, Equipe e resultados -- nunca informação de saúde, que fica restrita a quem precisa dela
+
+POR QUANTO TEMPO GUARDAMOS
+- [PREENCHER: a escola precisa definir e completar este prazo]
+
+COMPARTILHAMENTO COM TERCEIROS
+- Os dados ficam hospedados no Supabase, provedor de infraestrutura usado para sincronizar as informações entre dispositivos. [PREENCHER: a escola precisa confirmar em que país o Supabase está hospedando os dados]
+
+SEUS DIREITOS
+Você pode solicitar acesso, correção ou exclusão dos dados a qualquer momento, usando o botão "Privacidade / meus dados" no topo da página.
+
+ENCARREGADO PELO TRATAMENTO DE DADOS (DPO)
+- [PREENCHER: nome e contato do encarregado indicado pela escola]`;
 
 /* Substitui os marcadores {{...}} do edital pelos valores atuais configurados em STATE.regras. */
 function applyRegrasPlaceholders(html){
@@ -1437,6 +1503,8 @@ async function ensureDefaults(s){
   delete s.espacos; // funcionalidade "Espaços de Disputa" / aba Tabela removida
   if(typeof s.editalHtml !== 'string' || !s.editalHtml) s.editalHtml = await getDefaultEditalHtml();
   else s.editalHtml = sanitizeEditalHtml(s.editalHtml); // um backup externo pode trazer HTML malicioso -- nunca confia sem sanitizar (ver sanitizeEditalHtml)
+  if(typeof s.avisoPrivacidadeHtml !== 'string' || !s.avisoPrivacidadeHtml) s.avisoPrivacidadeHtml = editalPlainTextToHtml(AVISO_PRIVACIDADE_PADRAO_TEXTO);
+  else s.avisoPrivacidadeHtml = sanitizeEditalHtml(s.avisoPrivacidadeHtml); // mesmo motivo do editalHtml -- pode vir de um backup malicioso
   // Migração: remove as variáveis "segmento" (grupo) e "série" das equipes e dos jogos —
   // a competição passa a ser disputada por todas as equipes entre si, sem essa divisão.
   s.teams.forEach(t=>{ delete t.grupo; delete t.serie; });
@@ -1467,6 +1535,7 @@ async function ensureDefaults(s){
   s.solicitacoesPrivacidade.forEach(sp=>{
     if(typeof sp.atendida !== 'boolean') sp.atendida = false;
   });
+  if(!Array.isArray(s.registroOperacoes)) s.registroOperacoes = [];
   return s;
 }
 
@@ -2021,6 +2090,7 @@ const SYNC_COLECOES = {
   checkins:                { lista: ()=> STATE.checkins,                idField: 'id' },
   games:                   { lista: ()=> STATE.games,                  idField: 'id' },
   solicitacoesPrivacidade: { lista: ()=> STATE.solicitacoesPrivacidade, idField: 'id' },
+  registroOperacoes:       { lista: ()=> STATE.registroOperacoes,       idField: 'id' },
   inscritos:               {
     lista: ()=> STATE.inscritos, idField: 'id',
     // a foto do inscrito sincroniza à parte (tabela "inscrito_foto", ver mais abaixo) —
@@ -2033,7 +2103,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','adminAuth','codigoAcessoCifraSalt'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','codigoAcessoCifraSalt'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -2117,6 +2187,7 @@ function syncConstruirLinha(tabela, registroId){
       tabOrder: STATE.tabOrder,
       crachaConfig: STATE.crachaConfig,
       editalHtml: STATE.editalHtml,
+      avisoPrivacidadeHtml: STATE.avisoPrivacidadeHtml,
       adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash, algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter},
       codigoAcessoCifraSalt: STATE.codigoAcessoCifraSalt || null,
     };
@@ -2239,6 +2310,7 @@ function syncAplicarLinha(linha){
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = sanitizeEditalHtml(dados);
+    else if(registro_id==='avisoPrivacidadeHtml') STATE.avisoPrivacidadeHtml = sanitizeEditalHtml(dados);
     else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null; }
     else if(registro_id==='codigoAcessoCifraSalt') STATE.codigoAcessoCifraSalt = dados||null;
     return;
@@ -2723,6 +2795,7 @@ async function attemptLogin(){
     isAdmin = true;
     adminSenhaEmMemoria = val;
     try{ sessionStorage.setItem(ADMIN_SESSION_KEY,'1'); }catch(e){}
+    registrarOperacao('login_admin', 'Login de administrador');
     closeLoginModal();
     renderAll();
   } else {
@@ -2860,10 +2933,32 @@ function abrirSolicitarPrivacidadeModal(){
     if(el) el.value = id==='spTipo' ? 'exclusao' : '';
   });
   document.getElementById('spMsg').style.display = 'none';
+  renderAvisoPrivacidadeConteudo();
   document.getElementById('solicitarPrivacidadeModal').classList.add('open');
 }
 function fecharSolicitarPrivacidadeModal(){
   document.getElementById('solicitarPrivacidadeModal').classList.remove('open');
+}
+function renderAvisoPrivacidadeConteudo(){
+  const el = document.getElementById('avisoPrivacidadeConteudo');
+  if(el) el.innerHTML = STATE.avisoPrivacidadeHtml || '';
+  const editBtn = document.getElementById('btnEditarAvisoPrivacidade');
+  if(editBtn) editBtn.style.display = isAdmin ? 'inline-block' : 'none';
+}
+function abrirEditarAvisoPrivacidadeModal(){
+  if(!isAdmin) return;
+  document.getElementById('avisoPrivacidadeTextarea').value = editalHtmlToPlainText(STATE.avisoPrivacidadeHtml);
+  document.getElementById('editarAvisoPrivacidadeModal').classList.add('open');
+}
+function fecharEditarAvisoPrivacidadeModal(){
+  document.getElementById('editarAvisoPrivacidadeModal').classList.remove('open');
+}
+function salvarAvisoPrivacidade(){
+  const texto = document.getElementById('avisoPrivacidadeTextarea').value;
+  STATE.avisoPrivacidadeHtml = editalPlainTextToHtml(texto);
+  markDirty();
+  renderAvisoPrivacidadeConteudo();
+  fecharEditarAvisoPrivacidadeModal();
 }
 function enviarSolicitacaoPrivacidade(){
   const msg = document.getElementById('spMsg');
@@ -2890,6 +2985,7 @@ function enviarSolicitacaoPrivacidade(){
 function abrirSolicitacoesPrivacidadeModal(){
   if(!isAdmin) return;
   renderSolicitacoesPrivacidadeBody();
+  renderRegistroOperacoesBody();
   document.getElementById('solicitacoesPrivacidadeModal').classList.add('open');
 }
 function fecharSolicitacoesPrivacidadeModal(){
@@ -2922,10 +3018,70 @@ function renderSolicitacoesPrivacidadeBody(){
       const sp = STATE.solicitacoesPrivacidade.find(x=>x.id===id);
       if(!sp) return;
       sp.atendida = !sp.atendida;
+      if(sp.atendida) registrarOperacao('solicitacao_privacidade_atendida', `Solicitação de privacidade atendida: ${SP_TIPO_LABEL[sp.tipo]||sp.tipo} — ${sp.inscritoNome}`);
       markDirty();
       renderSolicitacoesPrivacidadeBody();
     });
   });
+}
+
+const REGISTRO_OPERACAO_LABEL = {
+  login_admin: 'Login de admin', inscrito_criado: 'Inscrito criado', inscrito_criado_lote: 'Inscritos criados (lote)',
+  inscrito_removido: 'Inscrito removido', backup_exportado: 'Backup exportado',
+  solicitacao_privacidade_atendida: 'Solicitação de privacidade atendida', eliminacao_dados_sensiveis: 'Dados sensíveis eliminados (retenção)',
+};
+function renderRegistroOperacoesBody(){
+  const body = document.getElementById('registroOperacoesBody');
+  if(!body) return;
+  const lista = STATE.registroOperacoes.slice().sort((a,b)=> new Date(b.quando) - new Date(a.quando)); // mais recente primeiro
+  if(lista.length===0){ body.innerHTML = '<p class="hint">Nenhuma operação registrada ainda.</p>'; return; }
+  body.innerHTML = `<table><thead><tr><th>Quando</th><th>Operação</th><th>Detalhes</th></tr></thead><tbody>
+    ${lista.map(r=>`<tr>
+      <td class="mono">${new Date(r.quando).toLocaleString('pt-BR')}</td>
+      <td>${escPdf(REGISTRO_OPERACAO_LABEL[r.tipo]||r.tipo)}</td>
+      <td>${escPdf(r.descricao)}</td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+/* Retenção/eliminação de dados sensíveis pós-evento (LGPD Art. 15/16 -- eliminar dado
+   pessoal quando a finalidade for atingida). Foto e dado de saúde (alergia/restrição
+   alimentar) só são necessários DURANTE o evento (identificação visual no crachá,
+   segurança na hora da alimentação) -- depois que o torneio termina, mantê-los é um
+   risco sem propósito. Nome/Equipe/modalidades/resultados NÃO são apagados aqui: são o
+   registro histórico legítimo de quem competiu e o resultado, sem exigir dado sensível
+   nenhum pra isso.
+
+   Limite técnico honesto: isso limpa a REFERÊNCIA da foto em STATE (o app para de
+   mostrar/sincronizar), mas não apaga o arquivo de imagem em si do Supabase Storage --
+   a auditoria de RLS desta mesma sessão bloqueou DELETE no bucket de propósito (pra
+   ninguém conseguir apagar foto de ninguém só com a anon key pública). O arquivo órfão
+   (sem nenhuma referência apontando pra ele) fica no Storage até alguém com acesso ao
+   painel do Supabase apagar manualmente -- fora do alcance do app por decisão de
+   segurança consciente, não descuido. */
+function iniciarEliminarDadosSensiveis(){
+  if(!isAdmin) return;
+  const qtd = STATE.inscritos.filter(a=> a.foto || a.restricaoAlimentar || a.alergiaMedicamento).length;
+  if(qtd===0){ showAlert('Nenhum inscrito tem foto ou dado de saúde cadastrado no momento.'); return; }
+  pedirSenhaAdmin('Confirme sua senha', `Essa ação apaga foto e dado de saúde (alergia/restrição alimentar) de TODOS os inscritos (${qtd} afetado${qtd>1?'s':''}) de uma vez. Nome, Equipe, modalidades e resultados continuam intactos. Use só depois que o torneio já terminou e esses dados não são mais necessários.`).then(senha=>{
+    if(!senha) return; // cancelado
+    showConfirm(`Eliminar foto e dado de saúde de ${qtd} inscrito(s)? Essa ação não pode ser desfeita — o texto original (alergia/restrição) não fica salvo em nenhum lugar depois disso.`, ()=>{
+      eliminarDadosSensiveis();
+    });
+  });
+}
+function eliminarDadosSensiveis(){
+  let qtd = 0;
+  STATE.inscritos.forEach(a=>{
+    if(a.foto || a.restricaoAlimentar || a.alergiaMedicamento) qtd++;
+    if(a.foto){ imgSet(a.foto, null); a.foto = ''; }
+    a.restricaoAlimentar = false; a.restricoesAlimentares = '';
+    a.alergiaMedicamento = false; a.alergias = '';
+  });
+  registrarOperacao('eliminacao_dados_sensiveis', `Foto e dado de saúde eliminados de ${qtd} inscrito(s) (retenção pós-evento)`);
+  markDirty();
+  renderAll();
+  showAlert(`Pronto. Foto e dado de saúde eliminados de ${qtd} inscrito(s). Nome, Equipe, modalidades e resultados continuam intactos.`);
 }
 
 
@@ -3170,6 +3326,8 @@ function renderHeaderBlock(){
     const pendentes = (STATE.solicitacoesPrivacidade||[]).filter(s=>!s.atendida).length;
     solicitacoesBtn.textContent = pendentes>0 ? `🔒 Solicitações de privacidade (LGPD) — ${pendentes} pendente${pendentes>1?'s':''}` : '🔒 Solicitações de privacidade (LGPD)';
   }
+  const eliminarSensiveisBtn = document.getElementById('btnEliminarDadosSensiveis');
+  if(eliminarSensiveisBtn) eliminarSensiveisBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const adminDivider = document.getElementById('adminOnlyDivider');
   if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
   // "💾 Salvar" só faz algo quando isAdmin ou accessoEquipeId (ver o clique, mais abaixo
@@ -4902,6 +5060,23 @@ function nextSolicitacaoPrivacidadeId(){
   const maiorAtual = STATE.solicitacoesPrivacidade.reduce((m,s)=>Math.max(m,s.id),0);
   return maiorAtual + 1 + Math.floor(Math.random()*1000000);
 }
+/* Salto aleatório (regra 4 do PROJETO.md) -- ver nextInscritoId() pra explicação completa. */
+function nextRegistroOperacaoId(){
+  const maiorAtual = STATE.registroOperacoes.reduce((m,r)=>Math.max(m,r.id),0);
+  return maiorAtual + 1 + Math.floor(Math.random()*1000000);
+}
+/* Registro de operações de tratamento de dado pessoal (LGPD Art. 37) -- guarda só as
+   operações mais relevantes (criar/remover inscrito, exportar backup, login de admin,
+   atender solicitação de privacidade), não cada clique. `dispositivo` reaproveita o
+   mesmo syncDeviceId já usado no resto da sincronização -- não identifica a PESSOA (o
+   app não tem contas individuais de admin), só de qual aparelho a ação partiu. */
+function registrarOperacao(tipo, descricao){
+  STATE.registroOperacoes.push({
+    id: nextRegistroOperacaoId(), tipo, descricao,
+    quando: new Date().toISOString(), dispositivo: syncDeviceId,
+  });
+  markDirty();
+}
 function renderAglutinadoresList(){
   const wrap = document.getElementById('aglutinadoresList');
   if(!wrap) return;
@@ -5926,6 +6101,7 @@ function bindInscritosEvents(){
           foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
           consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
         });
+        registrarOperacao('inscrito_criado', `Inscrito cadastrado (admin): ${nome}`);
         alNovoFotoDataUrl = null;
         updateAlNovaFotoPreview();
         document.getElementById('alNome').value='';
@@ -6054,8 +6230,13 @@ function renderInscritosBody(){
       if(!isAdmin) return;
       const id = Number(btn.closest('tr').dataset.id);
       showConfirm('Remover este inscrito da lista?', ()=>{
+        // Busca de novo por ID (regra 1 do PROJETO.md) -- nunca confia numa referência
+        // capturada antes do showConfirm(), já que uma sincronização concorrente pode
+        // ter mudado a lista enquanto o diálogo esperava confirmação.
+        const alvo = STATE.inscritos.find(a=>a.id===id);
         imgSet('foto_'+id, null);
         STATE.inscritos = STATE.inscritos.filter(a=>a.id!==id);
+        if(alvo) registrarOperacao('inscrito_removido', `Inscrito removido (admin): ${alvo.nome}`);
         markDirty(); renderInscritosBody();
       });
     });
@@ -7022,6 +7203,7 @@ function commitImportPlan(plano){
     }
   });
   markDirty();
+  if(criados>0) registrarOperacao('inscrito_criado_lote', `${criados} inscrito(s) criado(s) por importação em lote`);
   renderInscritosBody();
   closeImportReviewModal();
   showAlert(`Importação concluída!\n\n${criados} inscrito(s) novo(s) criado(s).\n${atualizados} inscrito(s) já existiam e tiveram dados atualizados.${artisticasCriadas?`\n${artisticasCriadas} apresentação(ões) artística(s) registrada(s).`:''}`);
@@ -7604,6 +7786,7 @@ const FECHAR_MODAL_POR_ID = {
   painelModal: closePainelModal,
   solicitarPrivacidadeModal: fecharSolicitarPrivacidadeModal,
   solicitacoesPrivacidadeModal: fecharSolicitacoesPrivacidadeModal,
+  editarAvisoPrivacidadeModal: fecharEditarAvisoPrivacidadeModal,
 };
 /* genericAlertModal é reaproveitado tanto por showAlert() (só um botão "OK") quanto por
    showConfirm() (dois botões) -- Esc precisa se comportar como "Cancelar" quando os dois
@@ -8972,6 +9155,7 @@ function baixarArquivoJson(jsonString, filename){
 }
 function exportBackup(){
   baixarArquivoJson(construirBackupJsonString(), 'jim2026-backup-' + new Date().toISOString().slice(0,10) + '.json');
+  registrarOperacao('backup_exportado', 'Backup completo exportado (contém todos os dados pessoais, inclusive sensíveis)');
 }
 function importBackup(file){
   const reader = new FileReader();
@@ -9244,6 +9428,7 @@ function renderAcessoEquipeView(){
         foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
         consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
       });
+      registrarOperacao('inscrito_criado', `Inscrito cadastrado (representante de ${team.label}): ${nome}`);
       alNovoFotoDataUrl = null;
       markDirty();
       renderAcessoEquipeView();
@@ -9266,6 +9451,7 @@ function renderAcessoEquipeView(){
         imgSet('foto_'+id, null);
         STATE.inscritos = STATE.inscritos.filter(a=>a.id!==id);
         if(aeEditandoId===id) aeEditandoId = null;
+        registrarOperacao('inscrito_removido', `Inscrito removido (representante de Equipe): ${inscrito.nome}`);
         markDirty();
         renderAcessoEquipeView();
       });
@@ -9478,6 +9664,11 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('spEnviarBtn').addEventListener('click', enviarSolicitacaoPrivacidade);
   document.getElementById('btnSolicitacoesPrivacidade').addEventListener('click', abrirSolicitacoesPrivacidadeModal);
   document.getElementById('closeSolicitacoesPrivacidadeModal').addEventListener('click', fecharSolicitacoesPrivacidadeModal);
+  document.getElementById('btnEliminarDadosSensiveis').addEventListener('click', iniciarEliminarDadosSensiveis);
+  document.getElementById('btnEditarAvisoPrivacidade').addEventListener('click', abrirEditarAvisoPrivacidadeModal);
+  document.getElementById('closeEditarAvisoPrivacidadeModal').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
+  document.getElementById('cancelarEditarAvisoPrivacidadeBtn').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
+  document.getElementById('salvarAvisoPrivacidadeBtn').addEventListener('click', salvarAvisoPrivacidade);
   document.getElementById('clearModal').addEventListener('click', (e)=>{ if(e.target.id==='clearModal') closeClearModal(); });
   document.getElementById('closeFeedingModal').addEventListener('click', closeFeedingModal);
   document.getElementById('closeFeedingModal2').addEventListener('click', closeFeedingModal);
