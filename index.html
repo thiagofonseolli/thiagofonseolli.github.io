@@ -571,6 +571,7 @@
       </div>
     </div>
     <p class="hint" style="margin-top:8px;">Para trocar a foto, feche esta janela e clique na miniatura de foto do inscrito na lista.</p>
+    <p class="hint" id="editInscritoConsentimentoInfo" style="margin-top:4px;"></p>
     <div class="modal-actions">
       <button class="btn secondary" id="cancelEditInscritoBtn">Cancelar</button>
       <button class="btn" id="saveEditInscritoBtn">Salvar alterações</button>
@@ -640,6 +641,10 @@
     <h2 style="color:var(--navy); margin-top:0;">Revisar Importação</h2>
     <p class="hint">Confira o que foi encontrado na planilha antes de confirmar. Inscritos que já existem (mesmo nome, mesma equipe) têm as modalidades atualizadas, sem duplicar.</p>
     <div id="importReviewBody"></div>
+    <label style="font-size:12.5px; display:flex; align-items:flex-start; gap:8px; margin-top:10px;">
+      <input type="checkbox" id="importConsentimento" style="margin-top:3px;">
+      <span>Declaro possuir a autorização do responsável legal de cada inscrito(a) listado acima (ou, se maior de idade, do(a) próprio(a) inscrito(a)) para o cadastro dos dados desta planilha nos termos da LGPD, incluindo informações de saúde quando aplicável.</span>
+    </label>
     <div class="modal-actions">
       <button class="btn secondary" id="cancelImportReviewBtn">Cancelar</button>
       <button class="btn" id="confirmImportReviewBtn">✓ Confirmar importação</button>
@@ -5650,6 +5655,12 @@ function renderInscritosContentHtml(){
       </div>
     </div>
     <div class="row" style="margin-top:14px;">
+      <label style="font-size:12.5px; display:flex; align-items:flex-start; gap:8px; max-width:640px;">
+        <input type="checkbox" id="alConsentimento" ${adminDisabled()} style="margin-top:3px;">
+        <span>Declaro possuir a autorização do responsável legal deste(a) inscrito(a) — ou, se maior de idade, a autorização do(a) próprio(a) inscrito(a) — para o cadastro dos dados acima nos termos da LGPD, incluindo informações de saúde quando aplicável.</span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px;">
       <button class="btn" id="alAdd" ${adminDisabled()}>+ Adicionar inscrito</button>
     </div>
   </div>
@@ -5738,10 +5749,18 @@ function bindInscritosEvents(){
       const restricoesAlimentares = temRestricao ? document.getElementById('alRestricoesTexto').value.trim() : '';
       const temAlergia = document.getElementById('alTemAlergia').value === 'sim';
       const alergiasMedicamento = temAlergia ? document.getElementById('alAlergiasTexto').value.trim() : '';
+      const consentimento = document.getElementById('alConsentimento').checked;
       if(!nome){ showAlert('Informe o nome do inscrito.'); return; }
       if(!teamId){ showAlert('Cadastre e escolha uma Equipe antes de adicionar um inscrito (na sub-aba "Equipes").'); return; }
       if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
       if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
+      // Exigido pela LGPD (Art. 14) pra dado de criança/adolescente -- não é uma
+      // verificação de verdade (o app não tem como confirmar que a autorização existe
+      // de fato), só registra a DECLARAÇÃO de quem está cadastrando, com data/hora, pra
+      // existir um registro em caso de auditoria. Um "sim" aqui não substitui o
+      // processo de autorização real da escola (termo em papel, formulário próprio
+      // etc.) -- só documenta que a pessoa confirmou tê-lo no momento do cadastro.
+      if(!consentimento){ showAlert('Confirme a declaração de autorização (LGPD) antes de cadastrar.'); return; }
 
       const criarInscrito = ()=>{
         const novoInscritoId = nextInscritoId();
@@ -5749,7 +5768,8 @@ function bindInscritosEvents(){
           id:novoInscritoId, nome, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
           restricaoAlimentar: temRestricao, restricoesAlimentares,
           alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
-          foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl)
+          foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
+          consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
         });
         alNovoFotoDataUrl = null;
         updateAlNovaFotoPreview();
@@ -5757,6 +5777,7 @@ function bindInscritosEvents(){
         document.querySelectorAll('.alModCheck').forEach(c=>c.checked=false);
         document.getElementById('alTemRestricao').value='nao'; document.getElementById('alRestricaoWrap').style.display='none'; document.getElementById('alRestricoesTexto').value='';
         document.getElementById('alTemAlergia').value='nao'; document.getElementById('alAlergiaWrap').style.display='none'; document.getElementById('alAlergiasTexto').value='';
+        document.getElementById('alConsentimento').checked = false;
         markDirty(); renderInscritosBody();
       };
 
@@ -5914,6 +5935,11 @@ function openEditInscritoModal(id){
   document.getElementById('editInscritoTemAlergia').value = temAlergia ? 'sim' : 'nao';
   document.getElementById('editInscritoAlergiaWrap').style.display = temAlergia ? 'flex' : 'none';
   document.getElementById('editInscritoAlergiasTexto').value = a.alergias || '';
+
+  const infoConsentimento = document.getElementById('editInscritoConsentimentoInfo');
+  infoConsentimento.textContent = a.consentimentoResponsavel
+    ? `✅ Autorização (LGPD) declarada em ${new Date(a.consentimentoRegistradoEm).toLocaleString('pt-BR')}.`
+    : '⚠️ Sem declaração de autorização (LGPD) registrada -- cadastro anterior a esta funcionalidade, ou importado de um backup antigo. Confirme com a Equipe se a autorização do responsável existe fora do sistema.';
 
   document.getElementById('editInscritoModal').classList.add('open');
 }
@@ -6789,6 +6815,7 @@ function openImportReviewModal(plano){
     </tbody></table></div>`;
   }
   body.innerHTML = html;
+  document.getElementById('importConsentimento').checked = false;
   const confirmBtn = document.getElementById('confirmImportReviewBtn');
   confirmBtn.style.display = validos.length ? '' : 'none';
   document.getElementById('importReviewModal').classList.add('open');
@@ -6799,6 +6826,11 @@ function closeImportReviewModal(){
 }
 function confirmImportReview(){
   if(!pendingImportPlan || pendingImportPlan.length===0) return;
+  // Mesma exigência da LGPD (Art. 14) do cadastro manual e do autoatendimento do
+  // representante -- ver comentário lá. Numa importação em lote, uma declaração única
+  // cobre todos os inscritos listados na revisão (mais prático que uma por linha, já
+  // que normalmente vem de um levantamento já feito pela escola/coordenação).
+  if(!document.getElementById('importConsentimento').checked){ showAlert('Confirme a declaração de autorização (LGPD) antes de importar.'); return; }
   commitImportPlan(pendingImportPlan);
 }
 function commitImportPlan(plano){
@@ -6808,7 +6840,8 @@ function commitImportPlan(plano){
     let inscrito = STATE.inscritos.find(a=> a.teamId===p.teamId && norm(a.nome)===norm(p.nome));
     if(!inscrito){
       inscrito = {id: nextInscritoId(), nome:p.nome, teamId:p.teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
-        restricaoAlimentar:false, restricoesAlimentares:'', alergiaMedicamento:false, alergias:'', foto:''};
+        restricaoAlimentar:false, restricoesAlimentares:'', alergiaMedicamento:false, alergias:'', foto:'',
+        consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()};
       STATE.inscritos.push(inscrito);
       criados++;
     } else {
@@ -8920,6 +8953,12 @@ function renderAcessoEquipeView(){
       </div>
     </div>
     <div class="row" style="margin-top:14px;">
+      ${!editando ? `<label style="font-size:12.5px; display:flex; align-items:flex-start; gap:8px; max-width:640px; width:100%; margin-bottom:4px;">
+        <input type="checkbox" id="aeConsentimento" style="margin-top:3px;">
+        <span>Declaro possuir a autorização do responsável legal deste(a) inscrito(a) — ou, se maior de idade, a autorização do(a) próprio(a) inscrito(a) — para o cadastro dos dados acima nos termos da LGPD, incluindo informações de saúde quando aplicável.</span>
+      </label>` : ''}
+    </div>
+    <div class="row" style="margin-top:4px;">
       <button class="btn" id="aeAdd">${editando?'💾 Salvar alterações':'+ Adicionar inscrito'}</button>
       ${editando?'<button class="btn secondary" id="aeCancelarEdicao">Cancelar edição</button>':''}
     </div>
@@ -8999,6 +9038,10 @@ function renderAcessoEquipeView(){
     if(!nome){ showAlert('Informe o nome do inscrito.'); return; }
     if(temRestricao && !restricoesAlimentares){ showAlert('Descreva as restrições alimentares, separadas por vírgula.'); return; }
     if(temAlergia && !alergiasMedicamento){ showAlert('Descreva as alergias a medicamentos, separadas por vírgula.'); return; }
+    // Exigido pela LGPD (Art. 14) só ao CADASTRAR (não ao editar um já cadastrado, que
+    // já tem essa declaração registrada desde a criação) -- ver mesmo comentário no
+    // cadastro manual do admin.
+    if(!aeEditandoId && !document.getElementById('aeConsentimento').checked){ showAlert('Confirme a declaração de autorização (LGPD) antes de cadastrar.'); return; }
 
     if(aeEditandoId){
       // Busca de novo, fresco, pelo ID — NÃO usa a `editando` capturada lá em cima na
@@ -9041,7 +9084,8 @@ function renderAcessoEquipeView(){
         id:novoInscritoId, nome, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
         restricaoAlimentar: temRestricao, restricoesAlimentares,
         alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
-        foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl)
+        foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
+        consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
       });
       alNovoFotoDataUrl = null;
       markDirty();
