@@ -4559,7 +4559,17 @@ function gtDuracaoDoLocalPorNome(nome){
    deslocamento configurada (STATE.geradorTabela.tempoDeslocamento) quando o outro jogo é
    em local diferente. `gameIdExcluir` evita comparar um jogo com ele mesmo. */
 function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir){
-  if(!teamId || !data || !hora) return false;
+  if(!teamId || !hora) return false;
+  // "Sem data configurada" (local sem dataInicio/dataFim) chega aqui às vezes como
+  // null e às vezes como '' (String vazia), dependendo de onde a chamada vem -- as duas
+  // formas precisam ser tratadas como o MESMO "dia" pra fins de conflito, senão dois
+  // jogos nesse mesmo "dia sem data" nunca são vistos como colidindo entre si (bug
+  // real: null!=='' em JavaScript, mesmo as duas significando "sem data"). Um early
+  // return antigo aqui (`|| !data`) ia além: pulava a checagem de conflito por
+  // completo sempre que `data` chegasse vazia, deixando a MESMA Equipe ser escalada
+  // em dois jogos ao mesmo horário sem nenhum aviso, sempre que o local não tivesse
+  // data configurada -- um cenário comum (evento de um dia só).
+  const dataNormalizada = data || '';
   const inicio = gtTimeToMin(hora);
   if(inicio==null) return false;
   const fim = inicio + (Number(duracaoMin)||0);
@@ -4567,7 +4577,7 @@ function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir)
   return STATE.games.some(g=>{
     if(g.id===gameIdExcluir) return false;
     if(g.teamA!==teamId && g.teamB!==teamId) return false;
-    if(g.data!==data || !g.hora) return false;
+    if((g.data||'')!==dataNormalizada || !g.hora) return false;
     const outroInicio = gtTimeToMin(g.hora);
     if(outroInicio==null) return false;
     const outroFim = outroInicio + gtDuracaoDoLocalPorNome(g.local);
@@ -4614,7 +4624,15 @@ function gerarTabelaConfrontos(sobrescrever){
   // Ao sobrescrever, os candidatos já têm hora/local de uma geração anterior — precisa
   // limpar ANTES de começar a alocar, senão gtTeamTemConflito() ainda os enxergaria com
   // o horário antigo ao checar conflito para os próximos candidatos da mesma leva.
-  if(sobrescrever) candidatos.forEach(g=>{ g.hora=''; g.local=''; });
+  if(sobrescrever) candidatos.forEach(g=>{
+    // Limpa TAMBÉM a data (não só hora/local) -- sem isso, um jogo que migrasse pra um
+    // local sem data configurada ficava com uma data "grudada" de um local anterior,
+    // sem relação nenhuma com o novo local/horário (bug real, confirmado com teste).
+    // Deixar tudo em branco antes de realocar garante que a data final sempre reflita
+    // de verdade o local pra onde o jogo foi (ou fica vazia, se esse local não tiver
+    // data configurada -- correto, não uma sobra do que veio antes).
+    g.hora=''; g.local=''; g.data='';
+  });
 
   let agendados=0, semEspaco=0, conflitosEvitados=0;
   const ponteiro = {};
