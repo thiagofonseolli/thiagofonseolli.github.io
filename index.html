@@ -963,7 +963,7 @@ function defaultRegras(){
    diferentes espaços/locais, horários e dias, respeitando regras gerais e as modalidades
    permitidas em cada local (ver seção "GERADOR DE TABELA" mais abaixo). */
 function defaultGeradorTabela(){
-  return { regras: [], locais: [], tempoDeslocamento: 0 };
+  return { regras: [], locais: [], tempoDeslocamento: 0, intervaloMinimoDescanso: 0 };
 }
 
 /* Assíncrona porque editalHtml precisa buscar o modelo padrão de um arquivo externo (ver
@@ -4190,7 +4190,7 @@ function renderGtStep1(){
   const regras = STATE.geradorTabela.regras;
   return `<div class="card">
     <h3 style="margin-top:0;">① Regras gerais a serem aplicadas</h3>
-    <p class="hint">Cadastre, uma de cada vez, os critérios que devem orientar a divisão dos confrontos entre os espaços (ex.: "Equipes com jogos consecutivos jogam em quadras vizinhas", "Modalidades femininas prioritariamente pela manhã", "Evitar dois jogos da mesma equipe no mesmo horário"). Cada regra vira um tópico separado, como referência para a organização — a distribuição automática dos confrontos continua sendo feita pelas etapas seguintes (locais e modalidades).</p>
+    <p class="hint">Cadastre, uma de cada vez, os critérios que devem orientar a divisão dos confrontos entre os espaços (ex.: "Equipes com jogos consecutivos jogam em quadras vizinhas", "Modalidades femininas prioritariamente pela manhã"). <strong>Atenção: isso aqui é só um lembrete escrito, pra você e sua equipe de organização — o gerador NÃO lê nem aplica esse texto automaticamente.</strong> Se a regra for sobre intervalo mínimo de descanso entre jogos de uma Equipe (ex.: "ninguém pode jogar de novo em menos de 60 minutos"), use o campo numérico "Intervalo mínimo de descanso" na etapa ③ — esse sim é aplicado de verdade pelo gerador. O gerador também já evita, sempre, marcar a mesma Equipe em dois jogos com horário exatamente coincidente.</p>
     <div id="gtRegrasList">${regras.length ? regras.map((r,i)=>renderGtRegraItem(r,i+1)).join('') : '<p class="hint" style="margin:0 0 10px;">Nenhuma regra cadastrada ainda.</p>'}</div>
     ${isAdmin ? `<div class="row" style="align-items:flex-end;">
       <div class="field" style="flex:1; min-width:280px;"><label class="f-label">Nova regra</label><input type="text" id="gtNovaRegra" placeholder="Ex.: Evitar dois jogos da mesma equipe no mesmo horário"></div>
@@ -4293,9 +4293,14 @@ function renderGtStep3(){
   html += locais.map(l=>renderGtModalidadesCard(l)).join('');
   html += `<div class="card">
     <div class="field" style="margin-bottom:12px;">
+      <label class="f-label">Intervalo mínimo de descanso entre jogos da mesma Equipe (min)</label>
+      <input type="number" min="0" id="gtIntervaloDescanso" value="${STATE.geradorTabela.intervaloMinimoDescanso||0}" style="width:100px;">
+      <p class="hint" style="margin:4px 0 0;">Tempo mínimo entre o fim de um jogo e o início do próximo da MESMA Equipe — vale mesmo que os dois jogos sejam no mesmo local (ex.: dois jogos seguidos na mesma quadra). É esse campo que resolve algo como "nenhuma Equipe pode jogar de novo com menos de 60 minutos de descanso" — escrever isso em "Regras gerais" (etapa ①) não é suficiente, aquele campo é só um lembrete escrito, não é aplicado pelo gerador. Deixe 0 para não exigir descanso nenhum além do fim de um jogo pro início do outro.</p>
+    </div>
+    <div class="field" style="margin-bottom:12px;">
       <label class="f-label">Tempo mínimo de deslocamento entre locais diferentes (min)</label>
       <input type="number" min="0" id="gtTempoDeslocamento" value="${STATE.geradorTabela.tempoDeslocamento||0}" style="width:100px;">
-      <p class="hint" style="margin:4px 0 0;">Se uma Equipe joga em dois locais diferentes no mesmo dia, o gerador garante pelo menos esse intervalo entre o fim de um confronto e o início do outro — evita marcar dois jogos em quadras diferentes tempo insuficiente pra Equipe se deslocar entre eles. Deixe 0 para não aplicar essa margem (só evita horários exatamente coincidentes, como antes).</p>
+      <p class="hint" style="margin:4px 0 0;">Além do descanso acima, se uma Equipe joga em dois locais DIFERENTES no mesmo dia, o gerador garante pelo menos esse intervalo a mais entre o fim de um confronto e o início do outro — pra dar tempo de se deslocar entre as quadras. Vale o MAIOR entre este campo e o descanso mínimo acima, nunca a soma dos dois. Deixe 0 para não exigir nenhum tempo de deslocamento extra.</p>
     </div>
     <label style="font-size:13px; display:flex; gap:8px; align-items:center;"><input type="checkbox" id="gtSobrescrever"> <span>Também reprogramar confrontos que já têm data/horário/local definidos</span></label>
     <div class="esp-wizard-nav" style="margin-top:14px;">
@@ -4564,9 +4569,20 @@ function gtDuracaoDoLocalPorNome(nome){
 
    Verifica se a Equipe `teamId`, jogando em `local` às `hora` do dia `data` (por
    `duracaoMin` minutos), colide com ALGUM outro jogo já existente dessa mesma Equipe em
-   STATE.games — seja por sobreposição real de horário, seja por não ter a margem de
-   deslocamento configurada (STATE.geradorTabela.tempoDeslocamento) quando o outro jogo é
-   em local diferente. `gameIdExcluir` evita comparar um jogo com ele mesmo. */
+   STATE.games — seja por sobreposição real de horário, seja por não ter o intervalo
+   mínimo entre dois jogos. Esse intervalo mínimo é o MAIOR entre dois números
+   diferentes, com propósitos diferentes:
+   - STATE.geradorTabela.intervaloMinimoDescanso: tempo de descanso da Equipe entre
+     dois jogos, MESMO no mesmo local (ex.: dois jogos seguidos na mesma quadra) — é
+     esse o número que resolve "jogadores não podem jogar com menos de 60 minutos de
+     descanso" (pedido relatado). Antes de existir esse campo, não havia NENHUM jeito
+     de configurar isso — só dava pra escrever a intenção em "Regras gerais", que é só
+     texto de referência, nunca aplicado de verdade pelo algoritmo (ver renderGtStep1).
+   - STATE.geradorTabela.tempoDeslocamento: tempo de deslocamento FÍSICO entre dois
+     locais diferentes (atravessar o colégio pra outra quadra) — só se aplica quando o
+     outro jogo é em local diferente; no mesmo local, esse número não faz sentido (a
+     Equipe já está lá), mas o descanso mínimo ainda se aplica.
+   `gameIdExcluir` evita comparar um jogo com ele mesmo. */
 function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir){
   if(!teamId || !hora) return false;
   // "Sem data configurada" (local sem dataInicio/dataFim) chega aqui às vezes como
@@ -4583,6 +4599,7 @@ function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir)
   if(inicio==null) return false;
   const fim = inicio + (Number(duracaoMin)||0);
   const tempoDeslocamento = Math.max(0, Number(STATE.geradorTabela.tempoDeslocamento)||0);
+  const intervaloMinimoDescanso = Math.max(0, Number(STATE.geradorTabela.intervaloMinimoDescanso)||0);
   return STATE.games.some(g=>{
     if(g.id===gameIdExcluir) return false;
     if(g.teamA!==teamId && g.teamB!==teamId) return false;
@@ -4590,7 +4607,10 @@ function gtTeamTemConflito(teamId, data, hora, local, duracaoMin, gameIdExcluir)
     const outroInicio = gtTimeToMin(g.hora);
     if(outroInicio==null) return false;
     const outroFim = outroInicio + gtDuracaoDoLocalPorNome(g.local);
-    const margem = (g.local===local) ? 0 : tempoDeslocamento;
+    // O intervalo mínimo de descanso sempre se aplica (mesmo local ou não); o tempo de
+    // deslocamento só soma quando o outro jogo é em local diferente -- a margem exigida
+    // é o MAIOR dos dois que se aplicar nesse caso, nunca a soma dos dois.
+    const margem = Math.max(intervaloMinimoDescanso, (g.local===local) ? 0 : tempoDeslocamento);
     // "gap" entre os dois intervalos: negativo/zero quando há sobreposição real
     const gap = inicio>=outroFim ? (inicio-outroFim) : (outroInicio>=fim ? (outroInicio-fim) : -1);
     return gap < margem;
@@ -4863,6 +4883,11 @@ function bindGeradorTabelaEvents(){
     });
     const back3 = document.getElementById('gtBack3');
     if(back3) back3.addEventListener('click', ()=>{ gtWizardStep=2; renderGeradorTabela(); });
+    const intervaloDescansoEl = document.getElementById('gtIntervaloDescanso');
+    if(intervaloDescansoEl) intervaloDescansoEl.addEventListener('change', ()=>{
+      STATE.geradorTabela.intervaloMinimoDescanso = Math.max(0, Number(intervaloDescansoEl.value)||0);
+      markDirty();
+    });
     const tempoDeslocEl = document.getElementById('gtTempoDeslocamento');
     if(tempoDeslocEl) tempoDeslocEl.addEventListener('change', ()=>{
       STATE.geradorTabela.tempoDeslocamento = Math.max(0, Number(tempoDeslocEl.value)||0);
