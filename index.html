@@ -4075,7 +4075,13 @@ let gtReagendarGameId = null;
 function gtDetectarConflitos(){
   const conflitos = new Set();
   STATE.games.forEach(g=>{
-    if(!g.data || !g.hora) return;
+    // Só exige horário -- NÃO exige data. Um jogo num local sem dataInicio/dataFim
+    // configurado fica com data='' de propósito (ver correção em gerarTabelaConfrontos),
+    // e ainda assim pode colidir com outro jogo da mesma Equipe nesse mesmo "sem data"
+    // (gtTeamTemConflito já trata isso corretamente). Exigir data aqui deixava esse
+    // cenário (comum: evento de um dia só, sem data por local) sem NENHUM aviso visual
+    // de conflito na grade, mesmo com um conflito real acontecendo.
+    if(!g.hora) return;
     const duracao = gtDuracaoDoLocalPorNome(g.local);
     if(gtTeamTemConflito(g.teamA, g.data, g.hora, g.local, duracao, g.id) ||
        gtTeamTemConflito(g.teamB, g.data, g.hora, g.local, duracao, g.id)){
@@ -4469,7 +4475,10 @@ function atualizarGtReagendarConflitoAviso(){
   const data = document.getElementById('gtrData').value;
   const hora = document.getElementById('gtrHora').value;
   const local = document.getElementById('gtrLocal').value.trim();
-  if(!data || !hora){ avisoEl.style.display='none'; return; }
+  // Só exige horário -- NÃO exige data (mesmo motivo de gtDetectarConflitos: um local
+  // sem dataInicio/dataFim configurado é reagendado de propósito sem data preenchida
+  // aqui, e mesmo assim pode colidir com outro jogo da mesma Equipe nesse "sem data").
+  if(!hora){ avisoEl.style.display='none'; return; }
   const duracao = gtDuracaoDoLocalPorNome(local);
   const conflitoEquipe = gtTeamTemConflito(g.teamA, data, hora, local, duracao, g.id) || gtTeamTemConflito(g.teamB, data, hora, local, duracao, g.id);
   const conflitoLocal = !!local && STATE.games.some(x=> x.id!==g.id && x.data===data && x.hora===hora && x.local===local);
