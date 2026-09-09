@@ -182,8 +182,6 @@
   .edital-topic-body{padding:12px 16px;}
   .edital-topic-body p:first-child{margin-top:0;}
   .edital-topic-body p:last-child{margin-bottom:0;}
-  .editTopicBtn{margin-left:auto; background:none; border:1px solid transparent; border-radius:5px; padding:2px 6px; cursor:pointer; font-size:12.5px; line-height:1; flex-shrink:0;}
-  .editTopicBtn:hover{background:#fff; border-color:var(--border);}
   .edital-topic summary{justify-content:flex-start;}
   .edital-topic-editing{background:#FFFBEA;}
   .edital-topic-editing > summary{background:#FFF3C4;}
@@ -361,6 +359,19 @@
     <div class="modal-actions">
       <button class="btn secondary" id="cancelarEditarAvisoPrivacidadeBtn">Cancelar</button>
       <button class="btn" id="salvarAvisoPrivacidadeBtn">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editarRegulamentoModal">
+  <div class="modal-box" style="max-width:760px;">
+    <button class="modal-close" id="closeEditarRegulamentoModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">✏️ Editar regulamento</h2>
+    <p class="hint">Escreva ou cole o regulamento inteiro aqui, de uma vez -- sem precisar de comandos HTML. Uma linha começando com "# " vira o título de uma seção (aparece no índice e no acordeão da aba Edital); uma linha em branco separa parágrafos; uma linha começando com "-" vira item de lista. Você pode usar os marcadores {{PTS_VITORIA}}, {{PTS_EMPATE}}, {{PTS_DERROTA}}, {{FP_A}}, {{FP_B}}, {{FP_C}}, {{FP_D}}, {{FP_E}} em qualquer lugar do texto -- eles são trocados pelos valores reais configurados em "Regras e Pontuação" automaticamente, sem precisar editar o texto de novo se a pontuação mudar depois.</p>
+    <textarea id="regulamentoCompletoTextarea" rows="20" style="width:100%; font-family:inherit; font-size:13px; padding:8px; border:1px solid var(--border); border-radius:5px;"></textarea>
+    <div class="modal-actions">
+      <button class="btn secondary" id="cancelarEditarRegulamentoBtn">Cancelar</button>
+      <button class="btn" id="salvarRegulamentoBtn">Salvar</button>
     </div>
   </div>
 </div>
@@ -1195,7 +1206,6 @@ function rebuildEditalHtml(preambuloHtml, topics){
   return out;
 }
 
-let editalEditingTopicIdx = null; // índice do tópico em edição inline no momento, ou null
 let editalTopicSearchQuery = ''; // texto atual digitado na busca do Regulamento
 
 /* Remove acentuação e caixa para permitir busca tolerante (ex.: "licoes" encontra "lições"). */
@@ -1270,12 +1280,58 @@ function editalPlainTextToHtml(text){
   flushList();
   return html;
 }
+/* Converte o editalHtml INTEIRO (preâmbulo + todos os tópicos) num único bloco de texto
+   simples, pra edição em massa de uma vez só (ver abrirEditarRegulamentoModal) — pedido
+   explícito depois de "trocar o regulamento inteiro" ter exigido reescrever tópico por
+   tópico na sessão anterior. Cada tópico vira uma linha "# Título" seguida do corpo em
+   texto simples (mesma convenção de editalHtmlToPlainText: "- " no início de uma linha
+   vira item de lista, linha em branco separa parágrafos) — inspirado em títulos de
+   markdown, convenção simples de explicar sem exigir nada técnico de quem edita. */
+function editalHtmlParaTextoCompleto(html){
+  const {preambuloHtml, topics} = parseEditalTopics(html);
+  const partes = [];
+  const preambuloTexto = editalHtmlToPlainText(preambuloHtml);
+  if(preambuloTexto.trim()) partes.push(preambuloTexto);
+  topics.forEach(t=>{
+    partes.push(`# ${t.title}`);
+    const corpo = editalHtmlToPlainText(t.bodyHtml||'');
+    if(corpo.trim()) partes.push(corpo);
+  });
+  return partes.join('\n\n');
+}
+/* Caminho inverso de editalHtmlParaTextoCompleto() — reconstrói o editalHtml completo a
+   partir do texto único editado: cada linha começando com "# " abre um tópico novo (o
+   resto da linha vira o título); tudo antes do primeiro "# " vira preâmbulo. O corpo de
+   cada tópico passa pela mesma conversão seguraeditalPlainTextToHtml() já usada em
+   qualquer edição de texto do Edital — escapa cada linha antes de virar HTML, protegendo
+   contra HTML digitado ou colado sem querer (ou de propósito) virar código de verdade. */
+function textoCompletoParaEditalHtml(texto){
+  const linhas = String(texto||'').split('\n');
+  const preambuloLinhas = [];
+  const topicos = [];
+  let atual = null;
+  linhas.forEach(linha=>{
+    const m = /^#\s+(.+)/.exec(linha);
+    if(m){
+      atual = {title: m[1].trim() || 'Sem título', linhasDoCorpo: []};
+      topicos.push(atual);
+    } else if(atual){
+      atual.linhasDoCorpo.push(linha);
+    } else {
+      preambuloLinhas.push(linha);
+    }
+  });
+  const preambuloHtml = editalPlainTextToHtml(preambuloLinhas.join('\n'));
+  const topics = topicos.map(t=> ({title:t.title, bodyHtml: editalPlainTextToHtml(t.linhasDoCorpo.join('\n'))}));
+  return rebuildEditalHtml(preambuloHtml, topics);
+}
 
-/* Transforma os tópicos estáticos do edital em tópicos expansíveis (accordion), com um botão
-   "✏️" em cada um (visível só para o administrador) que abre a edição direto ali dentro —
-   sem precisar abrir o modal geral. Os valores de {{...}} são substituídos apenas na exibição;
-   o texto salvo em STATE.editalHtml continua com os marcadores intactos. */
-
+/* Transforma os tópicos estáticos do edital em tópicos expansíveis (accordion),
+   com busca (ver editalTopicSearchQuery/editalTopicMatchesQuery). Os valores de {{...}}
+   são substituídos apenas na exibição; o texto salvo em STATE.editalHtml continua com os
+   marcadores intactos. A edição deixou de ser tópico por tópico aqui dentro — agora é um
+   único modal com o documento inteiro (ver abrirEditarRegulamentoModal), pedido explícito
+   depois de trocar o regulamento inteiro ter exigido mexer tópico por tópico. */
 function renderEditalAccordion(rawHtml){
   const {preambuloHtml, topics} = parseEditalTopics(rawHtml);
   if(topics.length===0) return applyRegrasPlaceholders(rawHtml); // nada reconhecido como tópico
@@ -1285,37 +1341,17 @@ function renderEditalAccordion(rawHtml){
   let matchCount = 0;
   topics.forEach((t,idx)=>{
     const numero = idx+1;
-    if(editalEditingTopicIdx===idx){
-      matchCount++; // o tópico em edição nunca some da lista, mesmo que não bata com a busca
-      out += `<details class="edital-topic edital-topic-editing" open data-topic-idx="${idx}" id="edital-topic-${idx}">
-        <summary>${numero}. ${escPdf(applyRegrasPlaceholders(t.title))} <span class="hint" style="margin:0; font-weight:400;">(editando)</span></summary>
-        <div class="edital-topic-body">
-          <div class="field"><label class="f-label">Título do tópico</label><input type="text" class="topicTitleInput" value="${escPdf(t.title)}" style="width:100%;"></div>
-          <div class="field" style="margin-top:8px;"><label class="f-label">Conteúdo do tópico</label>
-            <p class="hint" style="margin:2px 0 6px;">Escreva normalmente — sem precisar de comandos HTML. O texto aparece exatamente como aqui. Deixe uma linha em branco para separar parágrafos; para lista, comece a linha com "- ".</p>
-            <textarea class="topicBodyInput" rows="8" style="width:100%; font-family:'Inter',sans-serif; font-size:13.5px; padding:8px; border:1px solid var(--border); border-radius:5px; resize:vertical;">${escPdf(editalHtmlToPlainText(t.bodyHtml||''))}</textarea>
-          </div>
-          <div class="row" style="margin-top:8px;">
-            <button class="btn small topicSaveBtn">💾 Salvar tópico</button>
-            <button class="btn danger small topicDeleteBtn">🗑️ Excluir tópico</button>
-            <button class="btn secondary small topicCancelBtn">Cancelar</button>
-          </div>
-        </div>
-      </details>`;
-      return;
-    }
     if(!editalTopicMatchesQuery(t.title, t.bodyHtml, q)) return; // não bate com a busca — não exibe
 
     matchCount++;
     const displayTitle = applyRegrasPlaceholders(t.title);
     const displayBody = applyRegrasPlaceholders(t.bodyHtml||'');
     const semConteudo = !displayBody.replace(/<[^>]*>/g,'').trim();
-    const editBtn = isAdmin ? `<button class="editTopicBtn" data-topic-idx="${idx}" title="Editar este tópico">✏️</button>` : '';
     if(semConteudo){
-      out += `<p id="edital-topic-${idx}"><strong>${numero}. ${escPdf(displayTitle)}</strong>${editBtn}</p>`;
+      out += `<p id="edital-topic-${idx}"><strong>${numero}. ${escPdf(displayTitle)}</strong></p>`;
     } else {
       const abrirForcado = q ? ' open' : ''; // com busca ativa, abre direto no resultado
-      out += `<details class="edital-topic" data-topic-idx="${idx}" id="edital-topic-${idx}"${abrirForcado}><summary>${numero}. ${escPdf(displayTitle)}${editBtn}</summary><div class="edital-topic-body">${displayBody}</div></details>`;
+      out += `<details class="edital-topic" data-topic-idx="${idx}" id="edital-topic-${idx}"${abrirForcado}><summary>${numero}. ${escPdf(displayTitle)}</summary><div class="edital-topic-body">${displayBody}</div></details>`;
     }
   });
   if(matchCount===0 && q){
@@ -7894,6 +7930,7 @@ const FECHAR_MODAL_POR_ID = {
   solicitarPrivacidadeModal: fecharSolicitarPrivacidadeModal,
   solicitacoesPrivacidadeModal: fecharSolicitacoesPrivacidadeModal,
   editarAvisoPrivacidadeModal: fecharEditarAvisoPrivacidadeModal,
+  editarRegulamentoModal: fecharEditarRegulamentoModal,
 };
 /* genericAlertModal é reaproveitado tanto por showAlert() (só um botão "OK") quanto por
    showConfirm() (dois botões) -- Esc precisa se comportar como "Cancelar" quando os dois
@@ -8611,7 +8648,7 @@ function renderRegulamentoIntegraContentHtml(){
   const {topics} = parseEditalTopics(STATE.editalHtml);
   return `<div class="card">
     <h2>Edital / Regulamento — na íntegra</h2>
-    <p class="hint">Documento original anexado, convertido para leitura aqui no painel. Os números de pontuação exibidos abaixo refletem a seção "Regras e Pontuação" desta aba.${isAdmin ? ' Clique no ✏️ de cada tópico para editá-lo (ou excluí-lo) diretamente ali.' : ''}</p>
+    <p class="hint">Documento original anexado, convertido para leitura aqui no painel. Os números de pontuação exibidos abaixo refletem a seção "Regras e Pontuação" desta aba.${isAdmin ? ' Use o botão "✏️ Editar regulamento" abaixo para reescrever o documento inteiro de uma vez.' : ''}</p>
     <div class="field" style="margin:10px 0 12px;">
       <label class="f-label">🔎 Buscar no regulamento</label>
       <input type="text" id="editalTopicSearchInput" value="${escPdf(editalTopicSearchQuery)}" placeholder="Ex.: jogo limpo, xadrez, penalidade, uniforme..." style="width:100%;">
@@ -8623,9 +8660,9 @@ function renderRegulamentoIntegraContentHtml(){
     <div class="row" style="margin:12px 0;">
       <button class="btn secondary small" id="btnVisualizarEdital">👁️ Visualizar edital completo</button>
       <button class="btn secondary small" id="btnImprimirEdital">🖨️ Imprimir edital em PDF</button>
+      ${isAdmin ? `<button class="btn small" id="btnEditarRegulamento">✏️ Editar regulamento</button>` : ''}
     </div>
     <div id="editalRegulamentoBody"><div class="edital-content">${renderEditalAccordion(STATE.editalHtml)}</div></div>
-    ${isAdmin ? `<button class="btn small" id="btnNovoTopico" style="margin-top:12px;">+ Criar novo tópico</button>` : ''}
   </div>`;
 }
 /* Atualiza só o índice + a lista de tópicos (sem tocar no campo de busca), para digitar sem
@@ -8644,15 +8681,8 @@ function bindRegulamentoIntegraEvents(){
   if(btnVer) btnVer.addEventListener('click', openEditalViewModal);
   const btnImprimir = document.getElementById('btnImprimirEdital');
   if(btnImprimir) btnImprimir.addEventListener('click', gerarEditalPdf);
-  const btnNovo = document.getElementById('btnNovoTopico');
-  if(btnNovo) btnNovo.addEventListener('click', ()=>{
-    const {preambuloHtml, topics} = parseEditalTopics(STATE.editalHtml);
-    topics.push({title:'Novo tópico', bodyHtml:'<p>Digite aqui o conteúdo deste tópico.</p>'});
-    STATE.editalHtml = rebuildEditalHtml(preambuloHtml, topics);
-    markDirty();
-    editalEditingTopicIdx = topics.length-1;
-    renderEdital();
-  });
+  const btnEditar = document.getElementById('btnEditarRegulamento');
+  if(btnEditar) btnEditar.addEventListener('click', abrirEditarRegulamentoModal);
   const searchInput = document.getElementById('editalTopicSearchInput');
   if(searchInput) searchInput.addEventListener('input', debounce((e)=>{
     editalTopicSearchQuery = e.target.value;
@@ -8661,8 +8691,9 @@ function bindRegulamentoIntegraEvents(){
 
   bindEditalTopicDynamicEvents();
 }
-/* Bindings dos botões que existem dentro do índice + lista de tópicos — separados à parte
-   porque precisam ser reaplicados sempre que só essa área é atualizada (ex.: ao buscar). */
+/* Bindings dos links do índice — separados à parte porque precisam ser reaplicados sempre
+   que só essa área é atualizada (ex.: ao buscar). A edição de tópico deixou de existir
+   aqui dentro (ver abrirEditarRegulamentoModal, um único modal pro documento inteiro). */
 function bindEditalTopicDynamicEvents(){
   document.querySelectorAll('.edital-toc-link').forEach(link=>{
     link.addEventListener('click', (e)=>{
@@ -8674,58 +8705,30 @@ function bindEditalTopicDynamicEvents(){
       alvo.scrollIntoView({behavior:'smooth', block:'start'});
     });
   });
-  document.querySelectorAll('.editTopicBtn').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      editalEditingTopicIdx = Number(btn.dataset.topicIdx);
-      renderEdital();
-    });
-  });
-  document.querySelectorAll('.topicCancelBtn').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      editalEditingTopicIdx = null;
-      renderEdital();
-    });
-  });
-  document.querySelectorAll('.topicSaveBtn').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const details = btn.closest('.edital-topic');
-      const idx = Number(details.dataset.topicIdx);
-      const newTitle = details.querySelector('.topicTitleInput').value.trim() || 'Sem título';
-      const newBodyText = details.querySelector('.topicBodyInput').value;
-      const newBody = editalPlainTextToHtml(newBodyText);
-      const {preambuloHtml, topics} = parseEditalTopics(STATE.editalHtml);
-      if(topics[idx]){
-        topics[idx] = {title:newTitle, bodyHtml:newBody};
-        STATE.editalHtml = rebuildEditalHtml(preambuloHtml, topics);
-        markDirty();
-      }
-      editalEditingTopicIdx = null;
-      renderEdital();
-    });
-  });
-  document.querySelectorAll('.topicDeleteBtn').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const details = btn.closest('.edital-topic');
-      const idx = Number(details.dataset.topicIdx);
-      const {preambuloHtml, topics} = parseEditalTopics(STATE.editalHtml);
-      const titulo = topics[idx] ? topics[idx].title : '';
-      showConfirm(`Excluir o tópico "${titulo}"? Esta ação não pode ser desfeita.`, ()=>{
-        topics.splice(idx, 1);
-        STATE.editalHtml = rebuildEditalHtml(preambuloHtml, topics);
-        markDirty();
-        editalEditingTopicIdx = null;
-        renderEdital();
-      });
-    });
-  });
-  // Impede que o clique no botão "✏️", dentro do <summary>, também acione o toggle nativo do <details>
-  document.querySelectorAll('.edital-topic > summary').forEach(sm=>{
-    sm.addEventListener('click', (e)=>{ if(e.target.closest('.editTopicBtn')) e.preventDefault(); });
-  });
+}
+
+/* ----- Editar o regulamento inteiro de uma vez (um único campo de texto) -----
+   Substitui o antigo fluxo de "Novo tópico" / editar um tópico / excluir um tópico, cada
+   ação exigindo abrir algo diferente -- pedido explícito depois de trocar o regulamento
+   inteiro (JIM Mirim) ter exigido escrever um script pra montar tópico por tópico, em vez
+   de simplesmente colar o documento inteiro de uma vez. A busca/índice/exibição em
+   tópicos continuam exatamente como antes (mesma estrutura de dados por trás,
+   STATE.editalHtml) -- só a EDIÇÃO virou um único texto, convertido de ida e volta por
+   editalHtmlParaTextoCompleto()/textoCompletoParaEditalHtml(). */
+function abrirEditarRegulamentoModal(){
+  if(!isAdmin) return;
+  document.getElementById('regulamentoCompletoTextarea').value = editalHtmlParaTextoCompleto(STATE.editalHtml);
+  document.getElementById('editarRegulamentoModal').classList.add('open');
+}
+function fecharEditarRegulamentoModal(){
+  document.getElementById('editarRegulamentoModal').classList.remove('open');
+}
+function salvarRegulamentoCompleto(){
+  const texto = document.getElementById('regulamentoCompletoTextarea').value;
+  STATE.editalHtml = textoCompletoParaEditalHtml(texto);
+  markDirty();
+  fecharEditarRegulamentoModal();
+  renderEdital();
 }
 
 /* ----- Visualizar edital completo (todos os tópicos unidos, sem accordion) ----- */
@@ -9777,6 +9780,9 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('closeEditarAvisoPrivacidadeModal').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
   document.getElementById('cancelarEditarAvisoPrivacidadeBtn').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
   document.getElementById('salvarAvisoPrivacidadeBtn').addEventListener('click', salvarAvisoPrivacidade);
+  document.getElementById('closeEditarRegulamentoModal').addEventListener('click', fecharEditarRegulamentoModal);
+  document.getElementById('cancelarEditarRegulamentoBtn').addEventListener('click', fecharEditarRegulamentoModal);
+  document.getElementById('salvarRegulamentoBtn').addEventListener('click', salvarRegulamentoCompleto);
   document.getElementById('clearModal').addEventListener('click', (e)=>{ if(e.target.id==='clearModal') closeClearModal(); });
   document.getElementById('closeFeedingModal').addEventListener('click', closeFeedingModal);
   document.getElementById('closeFeedingModal2').addEventListener('click', closeFeedingModal);
