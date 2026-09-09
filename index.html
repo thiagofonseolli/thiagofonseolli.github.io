@@ -781,7 +781,13 @@ const LOGO_NAC_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAaQAAAC7CAMA
 function defaultTeams(){
   return [];
 }
-function defaultModalidades(){ return ['Futsal','Basquete','Handebol','Voleibol','Peteca']; }
+/* Modalidades do 43º JIM Mirim (ver REGULAMENTO_GERAL_DO_43º_JIM_MIRIM), diferentes das do
+   JIM "grande" que estavam aqui antes (Basquete, Voleibol, Peteca não constam no
+   regulamento do Mirim). O regulamento também restringe Handebol a partir do 3º ano (o 2º
+   ano não disputa) -- isso ainda não tem um jeito de ser configurado no app (ver conversa
+   sobre isolar cada turma/ano), fica como ajuste manual do admin por enquanto: ao cadastrar
+   as Equipes do 2º ano, simplesmente não marcar Handebol como modalidade delas. */
+function defaultModalidades(){ return ['Futsal','Handebol','Queimada','Porta Bandeira','Dodge ball']; }
 /* Modalidades individuais (pontuação por colocação geral, não por confronto direto).
    Ao contrário de STATE.modalidades (coletivas), esta lista vive em STATE.modalidadesIndividuais
    e pode ser editada pelo administrador (adicionar/remover) na aba Inscrições, logo abaixo de
@@ -935,11 +941,11 @@ function defaultSumulaTipos(){
    dinâmico do Edital e da aba "Regras Rápidas", para que tudo fique sempre sincronizado. */
 function defaultRegras(){
   return {
-    vitoria: 10,
-    empate: 5,
-    derrota: 0,
-    wo: 0,
-    fairPlay: {A:5, B:4, C:3, D:2, E:0},
+    vitoria: 20,
+    empate: 10,
+    derrota: 5,
+    wo: 0, // regulamento do JIM Mirim não menciona W.O. -- mantido em 0, mesmo valor já usado antes
+    fairPlay: {A:10, B:7, C:4, D:2, E:0},
     individual: [15,13,11,9,8,7,6,5,4,3,2,1],
     desfile: {
       participacao30: 10,   // pts ao atingir até 30% de estudantes desfilando
@@ -1033,15 +1039,15 @@ function defaultCrachaConfig(){
   };
 }
 
-/* Gera o texto padrão do edital a partir do modelo original, trocando os números de regras
-   fixos por marcadores {{...}} que são substituídos dinamicamente pelos valores de STATE.regras.
-   O modelo em si não fica mais embutido no index.html (era ~413KB, mais de um terço do
-   arquivo -- baixado em TODA visita, mesmo depois que o torneio já tem um edital de verdade
-   salvo no Supabase, quando esse conteúdo nunca mais é lido). Fica em edital-padrao.html,
-   buscado sob demanda só quando realmente precisa (instalação nova, ou um backup importado
-   sem editalHtml) -- ver defaultState()/ensureDefaults(), que por isso também viraram
-   assíncronas. Guardado em cache (editalPadraoCache) pra não buscar de novo se chamada mais
-   de uma vez na mesma sessão. */
+/* Gera o texto padrão do edital (regulamento) -- o modelo em si (com os marcadores
+   {{...}} já embutidos direto no arquivo, substituídos dinamicamente pelos valores de
+   STATE.regras via applyRegrasPlaceholders) não fica mais embutido no index.html (era
+   ~413KB, mais de um terço do arquivo -- baixado em TODA visita, mesmo depois que o
+   torneio já tem um edital de verdade salvo no Supabase, quando esse conteúdo nunca mais
+   é lido). Fica em edital-padrao.html, buscado sob demanda só quando realmente precisa
+   (instalação nova, ou um backup importado sem editalHtml) -- ver defaultState()/
+   ensureDefaults(), que por isso também viraram assíncronas. Guardado em cache
+   (editalPadraoCache) pra não buscar de novo se chamada mais de uma vez na mesma sessão. */
 let editalPadraoCache = null;
 async function getDefaultEditalHtml(){
   if(editalPadraoCache==null){
@@ -1057,12 +1063,7 @@ async function getDefaultEditalHtml(){
       editalPadraoCache = '<p><strong>Regulamento</strong></p><p>Edite este regulamento na aba Edital.</p>';
     }
   }
-  return editalPadraoCache
-    .replace('<p>• Vitória = 10 pontos;</p>', '<p>• Vitória = {{PTS_VITORIA}} pontos;</p>')
-    .replace('<p>• Empate = 5 pontos;</p>', '<p>• Empate = {{PTS_EMPATE}} pontos;</p>')
-    .replace('<p>• Derrota = 0 ponto;</p>', '<p>• Derrota = {{PTS_DERROTA}} ponto;</p>')
-    .replace('<p>• W.O = 0 ponto.</p>', '<p>• W.O = {{PTS_WO}} ponto.</p>')
-    .replace('A = 5 B = 4 C = 3 D = 2 E = 0', 'A = {{FP_A}} B = {{FP_B}} C = {{FP_C}} D = {{FP_D}} E = {{FP_E}}');
+  return editalPadraoCache;
 }
 
 /* Texto padrão do Aviso de Privacidade (LGPD) -- rascunho geral, com trechos marcados
@@ -3248,7 +3249,7 @@ function gamePoints(game, side){
 function computeStandings(){
   const teams = STATE.teams;
   const rows = teams.map(t=>{
-    let pontosJogos=0, golsPro=0, golsContra=0, fair=0;
+    let pontosJogos=0, golsPro=0, golsContra=0, fair=0, vitorias=0;
     STATE.games.forEach(g=>{
       let side=null;
       if(g.teamA===t.id) side='A'; else if(g.teamB===t.id) side='B';
@@ -3263,6 +3264,17 @@ function computeStandings(){
       }
       const fp = side==='A'?g.fpA:g.fpB;
       if(fp) fair += STATE.regras.fairPlay[fp]||0;
+      // Vitória de verdade (não infere pelo VALOR de pts, que dependeria de nenhuma outra
+      // pontuação coincidir com STATE.regras.vitoria -- confere a condição real do jogo,
+      // igual gamePoints() faz por dentro). Usado no critério de desempate "número de
+      // partidas vitoriosas" (ver REGULAMENTO_GERAL_DO_43º_JIM_MIRIM, seção "Das formas de
+      // desempate").
+      const other = side==='A'?'B':'A';
+      if(g.wo===other) vitorias++;
+      else if(g.wo==null && g.scoreA!=null && g.scoreB!=null){
+        const venceu = side==='A' ? g.scoreA>g.scoreB : g.scoreB>g.scoreA;
+        if(venceu) vitorias++;
+      }
     });
     let pontosIndividual=0;
     Object.keys(STATE.individual).forEach(key=>{
@@ -3279,9 +3291,35 @@ function computeStandings(){
     let pontosCriterios = 0;
     (STATE.criteriosPersonalizados||[]).forEach(c=>{ pontosCriterios += Number(c.pontos[t.id])||0; });
     const total = pontosJogos + fair + pontosIndividual + pontosDesfile + pontosAjustes + pontosCriterios;
-    return {team:t, pontosJogos, golsPro, golsContra, saldo:golsPro-golsContra, fair, pontosIndividual, pontosDesfile, pontosAjustes, pontosCriterios, total};
+    return {team:t, pontosJogos, golsPro, golsContra, saldo:golsPro-golsContra, fair, vitorias, pontosIndividual, pontosDesfile, pontosAjustes, pontosCriterios, total};
   });
-  rows.sort((a,b)=> b.total-a.total || b.saldo-a.saldo || b.golsPro-a.golsPro);
+  // Ordem de desempate conforme REGULAMENTO_GERAL_DO_43º_JIM_MIRIM, seção "Das formas de
+  // desempate" -- só entra em ação quando o total empata exatamente (o critério principal
+  // continua sendo o total, que já inclui o Jogo Limpo somado, ver "const total" acima):
+  //   1º maior pontuação no Jogo Limpo (fair) -- mesmo já contando pro total, duas equipes
+  //      podem chegar no mesmo total por combinações diferentes de pontos de jogo vs. jogo
+  //      limpo, então esse critério à parte ainda distingue esses casos;
+  //   2º maior número de partidas vencidas (vitorias);
+  //   3º saldo de gols -- desempatado por dentro em duas etapas, exatamente como o
+  //      regulamento descreve ("primeiro quem fez mais gols, segundo quem sofreu menos"):
+  //      primeiro por golsPro (quem fez mais), depois por golsContra (quem sofreu menos);
+  //   4º "saldo de pontos" do regulamento -- o app só rastreia um único placar
+  //      (scoreA/scoreB) pra qualquer modalidade, sem distinguir "gols" de "pontos" por
+  //      esporte (Porta Bandeira marca "ponto", não "gol", mas é o mesmo campo internamente)
+  //      -- então esse critério usaria exatamente os mesmos números já comparados no
+  //      critério anterior, sendo, na prática, sempre redundante com ele (não haveria como
+  //      dar um resultado diferente do 3º critério com os dados que o app guarda hoje);
+  //   5º sorteio -- não dá pra automatizar de verdade (precisa ser um sorteio real, feito
+  //      pela Comissão Organizadora na frente de todos) -- times que empatarem em TODOS os
+  //      critérios acima ficam em ordem estável (por id), com esse empate visível pra quem
+  //      olhar os números de perto; a decisão final caberia à comissão, fora do app.
+  rows.sort((a,b)=>
+    b.total-a.total ||
+    b.fair-a.fair ||
+    b.vitorias-a.vitorias ||
+    b.golsPro-a.golsPro ||
+    a.golsContra-b.golsContra
+  );
   return rows;
 }
 function leaderOf(){ const rows = computeStandings(); return rows[0]; }
