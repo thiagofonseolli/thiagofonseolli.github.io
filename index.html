@@ -367,7 +367,7 @@
   <div class="modal-box" style="max-width:760px;">
     <button class="modal-close" id="closeEditarRegulamentoModal">&times;</button>
     <h2 style="color:var(--navy); margin-top:0;">✏️ Editar regulamento</h2>
-    <p class="hint">Escreva ou cole o regulamento inteiro aqui, de uma vez -- sem precisar de comandos HTML. Uma linha começando com "# " vira o título de uma seção (aparece no índice e no acordeão da aba Edital); uma linha em branco separa parágrafos; uma linha começando com "-" vira item de lista. Você pode usar os marcadores {{PTS_VITORIA}}, {{PTS_EMPATE}}, {{PTS_DERROTA}}, {{FP_A}}, {{FP_B}}, {{FP_C}}, {{FP_D}}, {{FP_E}} em qualquer lugar do texto -- eles são trocados pelos valores reais configurados em "Regras e Pontuação" automaticamente, sem precisar editar o texto de novo se a pontuação mudar depois.</p>
+    <p class="hint">Escreva ou cole o regulamento inteiro aqui, de uma vez -- sem precisar de comandos HTML. Uma linha começando com "# " vira o título de uma seção (aparece no índice e no acordeão da aba Edital); uma linha em branco separa parágrafos; uma linha começando com "-" vira item de lista. Este texto é só para exposição do regulamento -- escreva os números (pontuação, jogo limpo etc.) diretamente aqui; eles não são lidos nem alterados automaticamente por nenhuma outra tela do app (a configuração de verdade, usada nos cálculos, fica em "Regras e Pontuação").</p>
     <textarea id="regulamentoCompletoTextarea" rows="20" style="width:100%; font-family:inherit; font-size:13px; padding:8px; border:1px solid var(--border); border-radius:5px;"></textarea>
     <div class="modal-actions">
       <button class="btn secondary" id="cancelarEditarRegulamentoBtn">Cancelar</button>
@@ -1050,12 +1050,13 @@ function defaultCrachaConfig(){
   };
 }
 
-/* Gera o texto padrão do edital (regulamento) -- o modelo em si (com os marcadores
-   {{...}} já embutidos direto no arquivo, substituídos dinamicamente pelos valores de
-   STATE.regras via applyRegrasPlaceholders) não fica mais embutido no index.html (era
-   ~413KB, mais de um terço do arquivo -- baixado em TODA visita, mesmo depois que o
-   torneio já tem um edital de verdade salvo no Supabase, quando esse conteúdo nunca mais
-   é lido). Fica em edital-padrao.html, buscado sob demanda só quando realmente precisa
+/* Gera o texto padrão do edital (regulamento) -- o modelo em si (texto puro, sem
+   nenhuma ligação com STATE.regras ou qualquer outro dado do app -- ver decisão de que
+   este campo é só exposição, nunca lido nem escrito por outra parte do app) não fica
+   mais embutido no index.html (era ~413KB, mais de um terço do arquivo -- baixado em
+   TODA visita, mesmo depois que o torneio já tem um edital de verdade salvo no
+   Supabase, quando esse conteúdo nunca mais é lido). Fica em edital-padrao.html,
+   buscado sob demanda só quando realmente precisa
    (instalação nova, ou um backup importado sem editalHtml) -- ver defaultState()/
    ensureDefaults(), que por isso também viraram assíncronas. Guardado em cache
    (editalPadraoCache) pra não buscar de novo se chamada mais de uma vez na mesma sessão. */
@@ -1113,45 +1114,7 @@ Você pode solicitar acesso, correção ou exclusão dos dados a qualquer moment
 ENCARREGADO PELO TRATAMENTO DE DADOS (DPO)
 - [PREENCHER: nome e contato do encarregado indicado pela escola]`;
 
-/* Substitui os marcadores {{...}} do edital pelos valores atuais configurados em STATE.regras. */
-function applyRegrasPlaceholders(html){
-  const R = STATE.regras;
-  return String(html||'')
-    .replace(/\{\{PTS_VITORIA\}\}/g, R.vitoria)
-    .replace(/\{\{PTS_EMPATE\}\}/g, R.empate)
-    .replace(/\{\{PTS_DERROTA\}\}/g, R.derrota)
-    .replace(/\{\{PTS_WO\}\}/g, R.wo)
-    .replace(/\{\{FP_A\}\}/g, R.fairPlay.A)
-    .replace(/\{\{FP_B\}\}/g, R.fairPlay.B)
-    .replace(/\{\{FP_C\}\}/g, R.fairPlay.C)
-    .replace(/\{\{FP_D\}\}/g, R.fairPlay.D)
-    .replace(/\{\{FP_E\}\}/g, R.fairPlay.E)
-    .replace(/\{\{DESF_30\}\}/g, R.desfile.participacao30)
-    .replace(/\{\{DESF_60\}\}/g, R.desfile.participacao60)
-    .replace(/\{\{DESF_80\}\}/g, R.desfile.participacao80)
-    .replace(/\{\{DESF_ORG\}\}/g, R.desfile.organizacaoMax)
-    .replace(/\{\{DESF_PERF\}\}/g, R.desfile.performanceMax)
-    .replace(/\{\{DESF_POST\}\}/g, R.desfile.posturaMax)
-    .replace(/\{\{PEN_LEVE\}\}/g, R.penalidades.leve)
-    .replace(/\{\{PEN_MODERADA\}\}/g, R.penalidades.moderada)
-    .replace(/\{\{PEN_GRAVE\}\}/g, R.penalidades.grave)
-    .replace(/\{\{PEN_SOM\}\}/g, R.penalidades.instrumentoSonoro)
-    .replace(/\{\{PEN_ESCALAR\}\}/g, R.penalidades.naoEscalar)
-    .replace(/\{\{PTS_IND_1\}\}/g, R.individual[0])
-    .replace(/\{\{PTS_IND_2\}\}/g, R.individual[1])
-    .replace(/\{\{PTS_IND_3\}\}/g, R.individual[2])
-    .replace(/\{\{PTS_IND_4\}\}/g, R.individual[3])
-    .replace(/\{\{PTS_IND_5\}\}/g, R.individual[4])
-    .replace(/\{\{PTS_IND_6\}\}/g, R.individual[5])
-    .replace(/\{\{PTS_IND_7\}\}/g, R.individual[6])
-    .replace(/\{\{PTS_IND_8\}\}/g, R.individual[7])
-    .replace(/\{\{PTS_IND_9\}\}/g, R.individual[8])
-    .replace(/\{\{PTS_IND_10\}\}/g, R.individual[9])
-    .replace(/\{\{PTS_IND_11\}\}/g, R.individual[10])
-    .replace(/\{\{PTS_IND_12\}\}/g, R.individual[11]);
-}
-
-/* Analisa o HTML bruto do edital (com os marcadores {{...}} ainda intactos) e separa em:
+/* Analisa o HTML bruto do edital e separa em:
    - preambuloHtml: qualquer conteúdo antes do primeiro título reconhecido
    - topics: lista de {title, bodyHtml}, um por <p><strong>TÍTULO</strong></p> encontrado
    Usada tanto para exibir os tópicos expansíveis quanto para editar/reconstruir o documento. */
@@ -1226,10 +1189,10 @@ function debounce(fn, ms){
     timer = setTimeout(()=> fn(...args), ms);
   };
 }
-/* Verifica se um tópico (título + corpo, já com os {{...}} substituídos) contém o termo buscado. */
+/* Verifica se um tópico (título + corpo) contém o termo buscado. */
 function editalTopicMatchesQuery(title, bodyHtml, normalizedQuery){
   if(!normalizedQuery) return true;
-  const plain = normalizeSearchText(applyRegrasPlaceholders(title) + ' ' + applyRegrasPlaceholders(bodyHtml||'').replace(/<[^>]*>/g,' '));
+  const plain = normalizeSearchText(title + ' ' + (bodyHtml||'').replace(/<[^>]*>/g,' '));
   return plain.includes(normalizedQuery);
 }
 
@@ -1327,25 +1290,28 @@ function textoCompletoParaEditalHtml(texto){
 }
 
 /* Transforma os tópicos estáticos do edital em tópicos expansíveis (accordion),
-   com busca (ver editalTopicSearchQuery/editalTopicMatchesQuery). Os valores de {{...}}
-   são substituídos apenas na exibição; o texto salvo em STATE.editalHtml continua com os
-   marcadores intactos. A edição deixou de ser tópico por tópico aqui dentro — agora é um
-   único modal com o documento inteiro (ver abrirEditarRegulamentoModal), pedido explícito
-   depois de trocar o regulamento inteiro ter exigido mexer tópico por tópico. */
+   com busca (ver editalTopicSearchQuery/editalTopicMatchesQuery). Exibição pura: o texto
+   é mostrado exatamente como o admin escreveu, sem nenhuma substituição automática de
+   valor vindo de outra parte do app (este campo é só pra EXPOR o regulamento -- ver
+   decisão explícita de que ele nunca lê nem escreve em nenhum outro dado do app; a
+   pontuação/jogo limpo/etc. têm suas próprias telas dedicadas, "Regras e Pontuação"). A
+   edição deixou de ser tópico por tópico aqui dentro — agora é um único modal com o
+   documento inteiro (ver abrirEditarRegulamentoModal), pedido explícito depois de trocar
+   o regulamento inteiro ter exigido mexer tópico por tópico. */
 function renderEditalAccordion(rawHtml){
   const {preambuloHtml, topics} = parseEditalTopics(rawHtml);
-  if(topics.length===0) return applyRegrasPlaceholders(rawHtml); // nada reconhecido como tópico
+  if(topics.length===0) return rawHtml; // nada reconhecido como tópico
 
   const q = normalizeSearchText(editalTopicSearchQuery);
-  let out = applyRegrasPlaceholders(preambuloHtml);
+  let out = preambuloHtml;
   let matchCount = 0;
   topics.forEach((t,idx)=>{
     const numero = idx+1;
     if(!editalTopicMatchesQuery(t.title, t.bodyHtml, q)) return; // não bate com a busca — não exibe
 
     matchCount++;
-    const displayTitle = applyRegrasPlaceholders(t.title);
-    const displayBody = applyRegrasPlaceholders(t.bodyHtml||'');
+    const displayTitle = t.title;
+    const displayBody = t.bodyHtml||'';
     const semConteudo = !displayBody.replace(/<[^>]*>/g,'').trim();
     if(semConteudo){
       out += `<p id="edital-topic-${idx}"><strong>${numero}. ${escPdf(displayTitle)}</strong></p>`;
@@ -1368,7 +1334,7 @@ function renderEditalIndiceHtml(rawHtml){
   const itens = [];
   topics.forEach((t, idx)=>{
     if(!editalTopicMatchesQuery(t.title, t.bodyHtml, q)) return;
-    const displayTitle = applyRegrasPlaceholders(t.title);
+    const displayTitle = t.title;
     itens.push(`<li><a href="javascript:void(0)" class="edital-toc-link" data-topic-idx="${idx}">${idx+1}. ${escPdf(displayTitle)}</a></li>`);
   });
   if(itens.length===0){
@@ -8733,14 +8699,14 @@ function salvarRegulamentoCompleto(){
 
 /* ----- Visualizar edital completo (todos os tópicos unidos, sem accordion) ----- */
 function openEditalViewModal(){
-  document.getElementById('editalViewContent').innerHTML = applyRegrasPlaceholders(STATE.editalHtml);
+  document.getElementById('editalViewContent').innerHTML = STATE.editalHtml;
   document.getElementById('editalViewModal').classList.add('open');
 }
 function closeEditalViewModal(){ document.getElementById('editalViewModal').classList.remove('open'); }
 
 /* ----- Imprimir o edital completo em PDF (abre uma janela de impressão, como as súmulas) ----- */
 function gerarEditalPdf(){
-  const conteudo = applyRegrasPlaceholders(STATE.editalHtml);
+  const conteudo = STATE.editalHtml;
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
