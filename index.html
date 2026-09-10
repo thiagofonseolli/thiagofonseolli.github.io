@@ -7427,12 +7427,17 @@ function closeImportJogosReviewModal(){
   document.getElementById('importJogosReviewModal').classList.remove('open');
 }
 /* Confirma o plano revisado -- se já existir um jogo com a MESMA dupla de Equipes (em
-   qualquer ordem) + modalidade + gênero, atualiza a data/horário/local dele em vez de
-   criar um duplicado (reimportar a mesma planilha corrigida não duplica confrontos). */
+   qualquer ordem) + modalidade + gênero + DATA, atualiza o horário/local dele em vez de
+   criar um duplicado (reimportar a mesma planilha corrigida não duplica confrontos).
+   Inclui a data na comparação de propósito -- a mesma dupla de Equipes pode
+   legitimamente jogar a mesma modalidade mais de uma vez, em dias diferentes (visto na
+   prática na TABELA_JIM_2026: algumas turmas do 2º ano jogam Porta Bandeira/Queimada
+   duas vezes, em datas distintas) -- sem considerar a data aqui, a segunda importação
+   substituiria a primeira em vez de criar um segundo jogo. */
 function commitImportJogosPlan(){
   let criados = 0, atualizados = 0;
   pendingImportJogosPlan.forEach(p=>{
-    let jogo = STATE.games.find(g=> g.modalidade===p.modalidade && g.genero===p.genero &&
+    let jogo = STATE.games.find(g=> g.modalidade===p.modalidade && g.genero===p.genero && g.data===p.data &&
       ((g.teamA===p.teamA && g.teamB===p.teamB) || (g.teamA===p.teamB && g.teamB===p.teamA)));
     if(!jogo){
       jogo = {id: nextGameId(), modalidade:p.modalidade, genero:p.genero, teamA:p.teamA, teamB:p.teamB,
