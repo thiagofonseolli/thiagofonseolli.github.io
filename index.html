@@ -825,6 +825,18 @@ function roundRobinPairs(ids){
 function teamsParaGenero(teams, genero){
   return teams.filter(t=> (t.genero||'X')==='X' || t.genero===genero);
 }
+/* Rótulo de exibição do gênero de um JOGO -- 'F'/'M' continuam left binários (a imensa
+   maioria dos jogos, criados pelo Gerador de Tabela, sempre foi assim), mas 'X' também é
+   um valor válido pra representar um confronto MISTO (ex.: Queimada, Porta Bandeira,
+   Dodge Ball, ou Futsal/Handebol "misto" do turno Vespertino -- ver
+   REGULAMENTO_GERAL_DO_43º_JIM_MIRIM e TABELA_JIM_2026). Reaproveitado em todo lugar que
+   mostra o gênero de um jogo, pra não repetir essa checagem de 3 jeitos ligeiramente
+   diferentes em cada tela. */
+function generoJogoLabel(genero, curto){
+  if(genero==='F') return curto ? 'Fem.' : 'Feminino';
+  if(genero==='M') return curto ? 'Masc.' : 'Masculino';
+  return 'Misto';
+}
 function buildAllGames(teams, modalidades){
   let games=[]; let id=1;
   modalidades.forEach(mod=>{
@@ -3697,7 +3709,7 @@ function ngTeamOptionsHtml(genero){
 }
 function renderJogos(){
   const modalidadesOpts = [['todas','Todas'], ...STATE.modalidades.map(m=>[m,m])];
-  const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino']];
+  const generos = [['todos','Todos'],['F','Feminino'],['M','Masculino'],['X','Misto']];
   const status = [['todos','Todos'],['pendente','Pendentes'],['ao_vivo','🔴 Ao vivo'],['feito','Concluídos']];
   const equipesOpts = [['todas','Todas'], ...STATE.teams.map(t=>[t.id, t.label])];
   // Local e Data são texto livre preenchido pelo admin em cada jogo (não uma lista fixa
@@ -3964,7 +3976,7 @@ function openGradeDiaModal(){
           <td class="mono">${g.data.split('-').reverse().join('/')}</td>
           <td class="mono">${escPdf(g.hora)}</td>
           <td>${escPdf(g.local)}</td>
-          <td>${escPdf(g.modalidade)} · ${g.genero==='F'?'Fem':'Masc'}</td>
+          <td>${escPdf(g.modalidade)} · ${generoJogoLabel(g.genero, true)}</td>
           <td>${teamChip(g.teamA, g.genero)} × ${teamChip(g.teamB, g.genero)}</td>
           <td><span class="badge ${statusInfo.status==='concluido'?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span></td>
         </tr>`;
@@ -4001,7 +4013,7 @@ function gerarGradeDiaPdf(){
       <td>${g.data.split('-').reverse().join('/')}</td>
       <td>${escPdf(g.hora)}</td>
       <td>${escPdf(g.local)}</td>
-      <td>${escPdf(g.modalidade)} — ${g.genero==='F'?'Feminino':'Masculino'}</td>
+      <td>${escPdf(g.modalidade)} — ${generoJogoLabel(g.genero)}</td>
       <td>${pdfTeamChip(g.teamA, g.genero)} × ${pdfTeamChip(g.teamB, g.genero)}</td>
       <td style="text-align:center;">${placar}</td>
       <td>${escPdf(statusInfo.label.replace('🔴 ',''))}</td>
@@ -4057,7 +4069,7 @@ function gameRowHtml(g){
   return `<div class="game-card game-row" data-id="${g.id}">
     <div class="game-row-summary" style="cursor:pointer;">
       <div class="game-row-info">
-        <span class="badge">${escPdf(g.modalidade)} · ${g.genero==='F'?'Feminino':'Masculino'}</span>
+        <span class="badge">${escPdf(g.modalidade)} · ${generoJogoLabel(g.genero)}</span>
         <span class="game-row-teams">${teamChip(g.teamA, g.genero)} <span class="mono" style="font-weight:700; font-size:13px;">${placarTxt}</span> ${teamChip(g.teamB, g.genero)}</span>
       </div>
       <div class="game-row-meta">
@@ -4426,7 +4438,7 @@ function gtRenderMatchCard(g, temConflito){
     </div>
     ${temConflito ? `<div style="font-size:10.5px; color:var(--crimson); font-weight:700; margin-bottom:5px;">⚠️ Equipe em choque de horário</div>` : ''}
     <div style="font-size:12.5px; line-height:1.6;">${teamChip(g.teamA,g.genero)} <span class="hint" style="margin:0;">×</span> ${teamChip(g.teamB,g.genero)}</div>
-    <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${escPdf(g.modalidade)} · ${g.genero==='F'?'Fem.':'Masc.'}</div>
+    <div style="font-size:10.5px; color:var(--muted); margin-top:3px;">${escPdf(g.modalidade)} · ${generoJogoLabel(g.genero, true)}</div>
     ${isAdmin ? `<button class="btn secondary small gtEditarSlot" data-gtgame="${g.id}" style="margin-top:7px; width:100%; font-size:11px; padding:4px 8px;">✏️ Reagendar</button>` : ''}
     ${isAdmin && g.hora && statusInfo.status!=='concluido' ? `<button class="btn secondary small gtLimparHorario" data-gtgame="${g.id}" title="Desmarca Data/Hora/Local deste confronto, sem apagar o jogo" style="margin-top:5px; width:100%; font-size:11px; padding:4px 8px;">🗑️ Limpar horário</button>` : ''}
   </div>`;
@@ -4517,7 +4529,7 @@ function openGtReagendarModal(gameId){
   const g = STATE.games.find(x=>x.id===gameId);
   if(!g) return;
   gtReagendarGameId = gameId;
-  document.getElementById('gtReagendarInfo').textContent = `${teamLabel(g.teamA)} × ${teamLabel(g.teamB)} — ${g.modalidade} (${g.genero==='F'?'Feminino':'Masculino'})`;
+  document.getElementById('gtReagendarInfo').textContent = `${teamLabel(g.teamA)} × ${teamLabel(g.teamB)} — ${g.modalidade} (${generoJogoLabel(g.genero)})`;
   document.getElementById('gtrLocal').value = g.local||'';
   document.getElementById('gtrData').value = g.data||'';
   document.getElementById('gtrHora').value = g.hora||'';
@@ -7872,7 +7884,10 @@ function tipoInfo(key, modalidade){
 }
 function inscritosDaSumula(game, side){
   const teamId = side==='A' ? game.teamA : game.teamB;
-  return STATE.inscritos.filter(a=> a.teamId===teamId && (a.modalidades||[]).includes(game.modalidade) && a.genero===game.genero);
+  // game.genero==='X' representa um confronto MISTO -- todo mundo da Equipe que jogar
+  // aquela modalidade entra na escalação, não só quem tem um gênero específico (mesma
+  // lógica já usada pra Equipe 'X' em teamsParaGenero -- estendida aqui pro JOGO).
+  return STATE.inscritos.filter(a=> a.teamId===teamId && (a.modalidades||[]).includes(game.modalidade) && (game.genero==='X' || a.genero===game.genero));
 }
 /* Avisa (sem bloquear) se outra partida já está marcada para o mesmo Local+Data+Hora —
    só quando os 3 campos estão preenchidos, pra não incomodar enquanto ainda estão sendo
@@ -8075,7 +8090,7 @@ function gerarSumulaPdf(gameId){
   const teamBName = teamLabel(game.teamB);
   const teamAChip = pdfTeamChip(game.teamA, game.genero);
   const teamBChip = pdfTeamChip(game.teamB, game.genero);
-  const generoLabel = game.genero==='F' ? 'Feminino' : 'Masculino';
+  const generoLabel = generoJogoLabel(game.genero);
   const dataLabel = formatDateBR(game.data);
   const horaLabel = game.hora || '—';
   const localLabel = game.local || '—';
