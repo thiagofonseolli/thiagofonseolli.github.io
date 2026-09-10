@@ -737,6 +737,19 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="importJogosReviewModal">
+  <div class="modal-box" style="max-width:820px;">
+    <button class="modal-close" id="closeImportJogosReviewModal">&times;</button>
+    <h2 style="color:var(--navy); margin-top:0;">Revisar Importação de Confrontos</h2>
+    <p class="hint">Confira o que foi encontrado na planilha antes de confirmar. Um confronto que já existe (mesma dupla de Equipes, modalidade e gênero) tem a data/horário/local atualizados, sem duplicar.</p>
+    <div id="importJogosReviewBody"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="cancelImportJogosReviewBtn">Cancelar</button>
+      <button class="btn" id="confirmImportJogosReviewBtn">✓ Confirmar importação</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="crachaResultModal">
   <div class="modal-box" style="max-width:420px;">
     <button class="modal-close" id="closeCrachaResultModal">&times;</button>
@@ -3746,13 +3759,28 @@ function renderJogos(){
       <p class="hint">Use para incluir uma partida extra (ex.: desempate ou jogo remarcado) fora da geração automática. As Equipes A/B mostradas se ajustam ao gênero escolhido — só aparecem as que participam dessa categoria (ver gênero configurado em Inscrições → Equipes). Data/Hora/Local são opcionais aqui — dá pra preencher depois, dentro do jogo.</p>
       <div class="row">
         <div class="field"><label class="f-label">Modalidade</label><select id="ngModalidade">${STATE.modalidades.map(m=>`<option value="${escPdf(m)}">${escPdf(m)}</option>`).join('')}</select></div>
-        <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+        <div class="field"><label class="f-label">Gênero</label><select id="ngGenero"><option value="F">Feminino</option><option value="M">Masculino</option><option value="X">Misto</option></select></div>
         <div class="field"><label class="f-label">equipe A</label><select id="ngTeamA">${ngTeamOptionsHtml('F')}</select></div>
         <div class="field"><label class="f-label">equipe B</label><select id="ngTeamB">${ngTeamOptionsHtml('F')}</select></div>
         <div class="field"><label class="f-label">Data</label><input type="date" id="ngData"></div>
         <div class="field"><label class="f-label">Hora</label><input type="time" id="ngHora"></div>
         <div class="field" style="flex:1; min-width:120px;"><label class="f-label">Local</label><input type="text" id="ngLocal" placeholder="Quadra 1"></div>
         <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ngAdd">+ Adicionar jogo</button></div>
+      </div>
+    </div>
+    <div style="margin-top:20px; padding-top:16px; border-top:1px dashed var(--border);">
+      <h2 style="font-size:15px;">📥 Importar confrontos em lote</h2>
+      <p class="hint">Pra quando os confrontos já estão definidos numa tabela pronta (ex.: um documento da comissão organizadora) — baixe o modelo, preencha uma linha por confronto, e importe aqui. Cada linha vira um jogo entre as duas Equipes da Turma informada (uma Turma sempre tem exatamente 2 Equipes, que jogam só entre si — ver "Turma" no modelo). Antes de gravar qualquer coisa, você confere numa tela de revisão o que foi encontrado, igual na importação de inscritos.</p>
+      <div class="row" style="align-items:flex-start; margin-top:10px;">
+        <div class="field">
+          <label class="f-label">1. Baixar o modelo</label>
+          <button class="btn secondary" id="jgBaixarModelo">📋 Baixar modelo de confrontos</button>
+        </div>
+        <div class="field">
+          <label class="f-label">2. Importar preenchido</label>
+          <button class="btn" id="jgImportarBtn">📤 Importar confrontos preenchidos</button>
+          <input type="file" id="jgImportarFile" accept=".xlsx" style="display:none;">
+        </div>
       </div>
     </div>
     <div style="margin-top:20px; padding-top:16px; border-top:1px dashed var(--border);">
@@ -3831,6 +3859,13 @@ function renderJogos(){
       STATE.games.push(novoJogo);
       markDirty(); renderGamesList(); renderScoreboard();
       verificarConflitoHorarioLocal(novoJogo);
+    });
+    document.getElementById('jgBaixarModelo').addEventListener('click', gerarModeloImportacaoJogosXlsx);
+    document.getElementById('jgImportarBtn').addEventListener('click', ()=> document.getElementById('jgImportarFile').click());
+    document.getElementById('jgImportarFile').addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      e.target.value = ''; // permite escolher o mesmo arquivo de novo depois, se precisar corrigir e reimportar
+      if(file) await processImportJogosXlsxFile(file);
     });
   }
 
@@ -7211,10 +7246,12 @@ function parseImportRows(header, rows){
 }
 
 /* Converte a grade de células de uma aba (formato do leitor de .xlsx já existente) numa
-   tabela header+linhas — localizando a linha de cabeçalho pelo CONTEÚDO ("Nome" e "Equipe"
-   na mesma linha), não por uma posição fixa, para tolerar textos de instrução nas linhas
-   de cima (como as que o próprio modelo gerado inclui). */
-function xlsxCellsParaTabela(cells){
+   tabela header+linhas — localizando a linha de cabeçalho pelo CONTEÚDO (todos os
+   `marcadores` presentes na mesma linha, ex.: "Nome"+"Equipe" pra inscritos, ou
+   "Turma"+"Modalidade" pra confrontos), não por uma posição fixa, para tolerar textos de
+   instrução nas linhas de cima (como as que o próprio modelo gerado inclui). */
+function xlsxCellsParaTabela(cells, marcadores){
+  marcadores = marcadores || ['nome','equipe'];
   const norm = s => normalizeSearchText(s||'').trim();
   let maxCol = 0, maxRow = 0;
   Object.keys(cells).forEach(ref=>{
@@ -7225,13 +7262,12 @@ function xlsxCellsParaTabela(cells){
   });
   let headerRow = null;
   for(let r=1; r<=maxRow; r++){
-    let temNome=false, temEquipe=false;
+    const encontrados = new Set();
     for(let c=1;c<=maxCol;c++){
       const v = norm(cells[xlsxColRowToRef(c,r)]);
-      if(v==='nome') temNome=true;
-      if(v==='equipe') temEquipe=true;
+      if(marcadores.includes(v)) encontrados.add(v);
     }
-    if(temNome && temEquipe){ headerRow = r; break; }
+    if(marcadores.every(m=>encontrados.has(m))){ headerRow = r; break; }
   }
   if(headerRow==null) return {header:[], rows:[]};
   const header = [];
@@ -7243,6 +7279,198 @@ function xlsxCellsParaTabela(cells){
     if(linha.some(v=>String(v).trim())) rows.push(linha); // pula linhas totalmente vazias
   }
   return {header, rows};
+}
+
+/* ===== Importação de confrontos em lote (mesmo padrão "revisar antes de confirmar" já
+   usado na importação de inscritos) =====
+   Cada linha da planilha vira UM jogo entre as duas Equipes de uma Turma (uma Turma
+   sempre tem exatamente 2 Equipes -- "EF4AM - VERMELHO" e "EF4AM - VERDE", por exemplo --
+   que só jogam entre si, nunca contra outra Turma). */
+function parseDataFlexivel(texto){
+  const t = String(texto||'').trim();
+  if(!t) return '';
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null; // formato não reconhecido
+}
+function parseHoraFlexivel(texto){
+  const t = String(texto||'').trim();
+  if(!t) return '';
+  let m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if(m) return `${m[1].padStart(2,'0')}:${m[2]}`;
+  m = /^(\d{1,2})\s*h\s*(\d{2})?$/i.exec(t);
+  if(m) return `${m[1].padStart(2,'0')}:${m[2]||'00'}`;
+  return null;
+}
+function parseGeneroFlexivel(texto){
+  const n = normalizeSearchText(texto);
+  if(n==='feminino' || n==='f') return 'F';
+  if(n==='masculino' || n==='m') return 'M';
+  if(n==='misto' || n==='x' || n==='ambos') return 'X';
+  return null;
+}
+/* Encontra as Equipes de uma Turma pelo prefixo do nome -- "EF4AM" encontra "EF4AM -
+   VERMELHO" e "EF4AM - VERDE" (separador entre o código da turma e a cor é flexível: " - ",
+   "-", ou só espaço). Uma Turma sempre deve ter exatamente 2 Equipes; menos ou mais que
+   isso é sinalizado como erro por quem chama, não resolvido aqui na marra. */
+function resolverEquipesDaTurma(turmaCodigo){
+  const norm = s=> normalizeSearchText(s||'').trim();
+  const prefixo = norm(turmaCodigo);
+  return STATE.teams.filter(t=>{
+    const label = norm(t.label);
+    return label===prefixo || label.startsWith(prefixo+' -') || label.startsWith(prefixo+'-') || label.startsWith(prefixo+' ');
+  });
+}
+function parseImportJogosRows(header, rows){
+  const norm = s => normalizeSearchText(s||'').trim();
+  const idx = nomeCol => header.findIndex(h=> norm(h)===norm(nomeCol));
+  const idxData = idx('Data');
+  const idxHora = idx('Horário')>=0 ? idx('Horário') : idx('Horario');
+  const idxLocal = idx('Local');
+  const idxModalidade = idx('Modalidade');
+  const idxGenero = idx('Genero')>=0 ? idx('Genero') : idx('Gênero');
+  const idxTurma = idx('Turma');
+
+  if(idxTurma<0 || idxModalidade<0){
+    return {plano:[], erroGeral:'O arquivo não parece seguir o modelo esperado — falta a coluna "Turma" ou "Modalidade". Baixe o modelo atualizado e preencha a partir dele.'};
+  }
+
+  const plano = [];
+  rows.forEach((cols, i)=>{
+    const linhaNum = i+2;
+    const turmaTxt = String(cols[idxTurma]||'').trim();
+    const modalidadeTxt = String(cols[idxModalidade]||'').trim();
+    if(!turmaTxt && !modalidadeTxt) return; // linha em branco -- ignora sem contar como erro
+
+    if(!turmaTxt){ plano.push({linha:linhaNum, ok:false, erro:'Turma não informada'}); return; }
+    if(!modalidadeTxt){ plano.push({linha:linhaNum, ok:false, erro:'Modalidade não informada'}); return; }
+
+    const modalidade = STATE.modalidades.find(m=> norm(m)===norm(modalidadeTxt));
+    if(!modalidade){ plano.push({linha:linhaNum, ok:false, erro:`Modalidade "${modalidadeTxt}" não cadastrada (confira em Inscrições → Modalidades)`}); return; }
+
+    const genero = parseGeneroFlexivel(idxGenero>=0 ? cols[idxGenero] : '');
+    if(!genero){ plano.push({linha:linhaNum, ok:false, erro:`Gênero "${idxGenero>=0?cols[idxGenero]:''}" não reconhecido — use Feminino, Masculino ou Misto`}); return; }
+
+    const equipesDaTurma = resolverEquipesDaTurma(turmaTxt);
+    if(equipesDaTurma.length===0){ plano.push({linha:linhaNum, ok:false, erro:`Nenhuma Equipe encontrada para a Turma "${turmaTxt}" — confira se as Equipes já foram cadastradas com esse prefixo no nome`}); return; }
+    if(equipesDaTurma.length===1){ plano.push({linha:linhaNum, ok:false, erro:`Só encontrei 1 Equipe pra Turma "${turmaTxt}" (esperava 2, uma por cor)`}); return; }
+    if(equipesDaTurma.length>2){ plano.push({linha:linhaNum, ok:false, erro:`Encontrei ${equipesDaTurma.length} Equipes pra Turma "${turmaTxt}" (esperava exatamente 2) — ajuste o nome das Equipes ou informe o código completo`}); return; }
+
+    const data = parseDataFlexivel(idxData>=0 ? cols[idxData] : '');
+    if(data===null){ plano.push({linha:linhaNum, ok:false, erro:`Data "${cols[idxData]}" não reconhecida — use AAAA-MM-DD ou DD/MM/AAAA`}); return; }
+
+    const hora = parseHoraFlexivel(idxHora>=0 ? cols[idxHora] : '');
+    if(hora===null){ plano.push({linha:linhaNum, ok:false, erro:`Horário "${cols[idxHora]}" não reconhecido — use HH:MM ou "8h55"`}); return; }
+
+    const local = idxLocal>=0 ? String(cols[idxLocal]||'').trim() : '';
+
+    plano.push({
+      linha: linhaNum, ok:true, modalidade, genero,
+      teamA: equipesDaTurma[0].id, teamB: equipesDaTurma[1].id,
+      teamALabel: equipesDaTurma[0].label, teamBLabel: equipesDaTurma[1].label,
+      data, hora, local,
+    });
+  });
+
+  return {plano, erroGeral:null};
+}
+async function processImportJogosXlsxFile(file){
+  if(!isAdmin) return;
+  let sheets;
+  try{
+    const buf = await file.arrayBuffer();
+    sheets = await readXlsxWorkbook(buf);
+  }catch(err){
+    showAlert('Não consegui ler este arquivo como .xlsx: ' + err.message);
+    return;
+  }
+  if(!sheets || sheets.length===0){ showAlert('Nenhuma aba encontrada nesse arquivo.'); return; }
+  const {header, rows} = xlsxCellsParaTabela(sheets[0].cells, ['turma','modalidade']);
+  if(header.length===0){
+    showAlert('Não encontrei as colunas "Turma" e "Modalidade" nesta planilha. Baixe o modelo atualizado e preencha a partir dele.');
+    return;
+  }
+  const {plano, erroGeral} = parseImportJogosRows(header, rows);
+  if(erroGeral){ showAlert(erroGeral); return; }
+  if(plano.length===0){ showAlert('Não encontrei nenhuma linha preenchida nesta planilha.'); return; }
+  openImportJogosReviewModal(plano);
+}
+let pendingImportJogosPlan = [];
+function openImportJogosReviewModal(plano){
+  const validos = plano.filter(p=>p.ok);
+  const invalidos = plano.filter(p=>!p.ok);
+  pendingImportJogosPlan = validos;
+  const body = document.getElementById('importJogosReviewBody');
+  let html = `<p class="hint">${validos.length} confronto(s) prontos para importar${invalidos.length?`, ${invalidos.length} com problema (não serão importados agora)`:''}.</p>`;
+  if(invalidos.length){
+    html += `<div class="card" style="background:#fff3f3; border-color:var(--crimson,#C0392B); margin-bottom:10px;">
+      <p class="hint" style="color:var(--crimson,#C0392B); margin:0 0 6px; font-weight:600;">Linhas não importadas — corrija na planilha e importe de novo:</p>
+      <table><thead><tr><th>Linha</th><th>Problema</th></tr></thead><tbody>
+      ${invalidos.map(p=>`<tr><td class="mono">${p.linha}</td><td>${escPdf(p.erro)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>`;
+  }
+  if(validos.length){
+    html += `<div style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:6px;">
+    <table><thead><tr><th>Data</th><th>Horário</th><th>Local</th><th>Modalidade</th><th>Gênero</th><th>Confronto</th></tr></thead><tbody>
+    ${validos.map(p=>`<tr><td class="mono">${p.data?p.data.split('-').reverse().join('/'):'<span class="hint">—</span>'}</td><td class="mono">${escPdf(p.hora||'—')}</td><td>${escPdf(p.local||'—')}</td><td>${escPdf(p.modalidade)}</td><td>${generoJogoLabel(p.genero)}</td><td>${escPdf(p.teamALabel)} × ${escPdf(p.teamBLabel)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  }
+  body.innerHTML = html;
+  const confirmBtn = document.getElementById('confirmImportJogosReviewBtn');
+  confirmBtn.style.display = validos.length ? '' : 'none';
+  document.getElementById('importJogosReviewModal').classList.add('open');
+}
+function closeImportJogosReviewModal(){
+  document.getElementById('importJogosReviewModal').classList.remove('open');
+}
+/* Confirma o plano revisado -- se já existir um jogo com a MESMA dupla de Equipes (em
+   qualquer ordem) + modalidade + gênero, atualiza a data/horário/local dele em vez de
+   criar um duplicado (reimportar a mesma planilha corrigida não duplica confrontos). */
+function commitImportJogosPlan(){
+  let criados = 0, atualizados = 0;
+  pendingImportJogosPlan.forEach(p=>{
+    let jogo = STATE.games.find(g=> g.modalidade===p.modalidade && g.genero===p.genero &&
+      ((g.teamA===p.teamA && g.teamB===p.teamB) || (g.teamA===p.teamB && g.teamB===p.teamA)));
+    if(!jogo){
+      jogo = {id: nextGameId(), modalidade:p.modalidade, genero:p.genero, teamA:p.teamA, teamB:p.teamB,
+        scoreA:null, scoreB:null, wo:null, data:'', hora:'', local:'', fpA:null, fpB:null, placarPorEventos:false};
+      STATE.games.push(jogo);
+      criados++;
+    } else {
+      atualizados++;
+    }
+    jogo.data = p.data; jogo.hora = p.hora; jogo.local = p.local;
+  });
+  markDirty();
+  if(criados>0) registrarOperacao('jogos_importados_lote', `${criados} confronto(s) criado(s) por importação em lote${atualizados?`, ${atualizados} já existente(s) atualizado(s)`:''}`);
+  renderGamesList(); renderScoreboard();
+  closeImportJogosReviewModal();
+  showAlert(`Importação concluída!\n\n${criados} confronto(s) novo(s) criado(s).\n${atualizados} confronto(s) já existiam e tiveram data/horário/local atualizados.`);
+}
+function gerarModeloImportacaoJogosXlsx(){
+  const header = ['Data','Horário','Local','Modalidade','Genero','Turma'];
+  const turmasRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
+  const sections = [
+    {tipo:'titulo', cells:[`Confrontos — ${STATE.eventName}`]},
+    {tipo:'instrucoes', cells:[`Uma linha por confronto. "Turma" é o prefixo comum das duas Equipes que vão se enfrentar (ex.: "EF4AM" encontra "EF4AM - VERMELHO" e "EF4AM - VERDE" — uma Turma sempre tem exatamente 2 Equipes, que só jogam entre si). ${turmasRef}. Data em AAAA-MM-DD ou DD/MM/AAAA; Horário em HH:MM ou "8h55". Modalidade e Genero têm uma lista pra escolher — clique na célula e selecione.`]},
+    {tipo:'blank', cells:[]},
+    {tipo:'header', cells:header},
+  ];
+  const colWidths = [14, 12, 22, 18, 14, 26];
+  const dataValidations = [
+    {col: header.indexOf('Modalidade')+1, options: STATE.modalidades},
+    {col: header.indexOf('Genero')+1, options: ['Feminino','Masculino','Misto']},
+  ];
+  const bytes = buildStyledXlsx('Confrontos', sections, colWidths, dataValidations);
+  const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'Modelo_Confrontos.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 async function processImportXlsxFile(file){
@@ -7991,6 +8219,7 @@ const FECHAR_MODAL_POR_ID = {
   editInscritoModal: closeEditInscritoModal,
   editArtisticaModal: closeEditArtisticaModal,
   importReviewModal: closeImportReviewModal,
+  importJogosReviewModal: closeImportJogosReviewModal,
   feedingModal: closeFeedingModal,
   qrScanModal: closeQrScanModal,
   editalViewModal: closeEditalViewModal,
@@ -9933,6 +10162,9 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('closeImportReviewModal').addEventListener('click', closeImportReviewModal);
   document.getElementById('cancelImportReviewBtn').addEventListener('click', closeImportReviewModal);
   document.getElementById('confirmImportReviewBtn').addEventListener('click', confirmImportReview);
+  document.getElementById('cancelImportJogosReviewBtn').addEventListener('click', closeImportJogosReviewModal);
+  document.getElementById('closeImportJogosReviewModal').addEventListener('click', closeImportJogosReviewModal);
+  document.getElementById('confirmImportJogosReviewBtn').addEventListener('click', commitImportJogosPlan);
   document.getElementById('importReviewModal').addEventListener('click', (e)=>{ if(e.target.id==='importReviewModal') closeImportReviewModal(); });
   document.getElementById('closeGradeDiaModal').addEventListener('click', closeGradeDiaModal);
   document.getElementById('gradeDiaModal').addEventListener('click', (e)=>{ if(e.target.id==='gradeDiaModal') closeGradeDiaModal(); });
