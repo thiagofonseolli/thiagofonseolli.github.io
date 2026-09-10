@@ -1707,6 +1707,30 @@ function teamColor(teamId, genero){
 /* Luminosidade percebida de uma cor hex (#RRGGBB), pra decidir se o texto por cima
    deve ser claro ou escuro — usada só quando a equipe tem cor manual, já que nesse
    caso não dá pra assumir a luminosidade a partir do gênero como no cálculo automático. */
+/* Nomes de cor comuns em português -> hex equivalente (mesmo valor do nome de cor CSS
+   correspondente) -- usado só pra resolver a coluna opcional "Cor" na importação de
+   planilha (ver resolverCorEquipe()), pra quem prefere escrever "Ciano" em vez de
+   "#00FFFF". Lista enxuta com as cores mais comuns pra um torneio (bandeiras/uniformes),
+   não uma paleta completa -- quem quiser uma cor fora dessa lista sempre pode escrever o
+   hex diretamente. */
+const CORES_NOME_PARA_HEX = {
+  'ciano':'#00FFFF', 'turquesa':'#40E0D0', 'amarelo':'#FFFF00', 'roxo':'#800080',
+  'vermelho':'#FF0000', 'verde':'#008000', 'laranja':'#FFA500', 'azul marinho':'#000080',
+  'azul':'#0000FF', 'rosa':'#FFC0CB', 'preto':'#000000', 'branco':'#FFFFFF',
+  'cinza':'#808080', 'marrom':'#8B4513', 'dourado':'#FFD700', 'prata':'#C0C0C0',
+  'lilás':'#C8A2C8', 'bordô':'#800020', 'salmão':'#FA8072', 'coral':'#FF7F50',
+};
+/* Resolve o texto de uma célula "Cor" (nome em português OU um hex direto, com ou sem
+   "#") pro formato #rrggbb que team.corManual espera. Retorna null se não reconhecer --
+   quem chama decide o que fazer (equipe fica sem cor definida, usa a automática). */
+function resolverCorEquipe(texto){
+  const t = String(texto||'').trim();
+  if(!t) return null;
+  const semHash = t.replace(/^#/, '');
+  if(/^[0-9a-f]{6}$/i.test(semHash)) return '#'+semHash.toLowerCase();
+  const porNome = CORES_NOME_PARA_HEX[normalizeSearchText(t)];
+  return porNome ? porNome.toLowerCase() : null;
+}
 function corHexEhClara(hex){
   const m = /^#?([0-9a-f]{6})$/i.exec(hex||'');
   if(!m) return true;
@@ -5090,6 +5114,16 @@ function renderModalidadesContentHtml(){
   <button class="toggle-section-btn" id="btnToggleModArtisticas" style="margin-top:10px;">${modArtisticasAberto?'▾':'▸'} Modalidades Artísticas</button>
   <div style="${modArtisticasAberto?'':'display:none;'} margin-top:10px;">${renderModalidadesArtisticasContentHtml()}</div>`;
 }
+/* Gera um ID interno único pra uma nova Equipe a partir do nome digitado (o texto visível
+   pra quem usa o app é sempre `label`, nunca este id) -- reaproveitado tanto no cadastro
+   manual (bindEquipesEvents) quanto na criação automática durante a importação de
+   planilha (ver commitImportPlan), pra não duplicar a mesma lógica nos dois lugares. */
+function gerarIdEquipeUnico(label){
+  let id = label.replace(/\s+/g,'');
+  let suffix=1; const baseId=id;
+  while(STATE.teams.some(t=>t.id===id)){ id = baseId+'_'+(++suffix); }
+  return id;
+}
 function bindEquipesEvents(){
   if(isAdmin){
     document.getElementById('ntAdd').addEventListener('click', ()=>{
@@ -5100,9 +5134,7 @@ function bindEquipesEvents(){
       const aglutinadorId = aglSel ? Number(aglSel) : null;
 
       const criarEquipe = ()=>{
-        let id = label.replace(/\s+/g,'');
-        let suffix=1; const baseId=id;
-        while(STATE.teams.some(t=>t.id===id)){ id = baseId+'_'+(++suffix); }
+        const id = gerarIdEquipeUnico(label);
         STATE.teams.push({id, label, genero, aglutinadorId});
         document.getElementById('ntLabel').value='';
         markDirty(); renderInscricoes(); renderScoreboard();
@@ -6898,7 +6930,7 @@ function buildStyledXlsx(sheetName, sections, colWidths, dataValidations){
 function colunasImportacao(){
   const mods = inscritoModalidadeOptions(); // coletivas + individuais + artística, tudo já dinâmico
   return {
-    fixas: ['Nome','Equipe','Genero'],
+    fixas: ['Nome','Equipe','Cor (só se a Equipe ainda não existir)','Genero'],
     mods,
     extras: ['Linguagem Artística (se marcar Artística)','Sinopse (se marcar Artística)','Restrição Alimentar','Quais Restrições','Alergia a Medicamento','Quais Alergias'],
   };
@@ -6909,11 +6941,11 @@ function gerarModeloImportacaoXlsx(){
   const equipesRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
   const sections = [
     {tipo:'titulo', cells:[`Ficha de Inscrição — ${STATE.eventName}`]},
-    {tipo:'instrucoes', cells:[`${equipesRef}. Genero, modalidades, Restrição Alimentar e Alergia a Medicamento têm uma lista pra escolher — clique na célula e selecione. Deixe Genero em branco se a equipe já for só de um gênero.`]},
+    {tipo:'instrucoes', cells:[`${equipesRef}. Se o nome em "Equipe" não bater com nenhuma já cadastrada, uma Equipe nova é criada automaticamente na importação -- preencha "Cor" nesse caso (nome em português como "Vermelho"/"Azul Marinho", ou um código hex como "#FF0000") para já nascer com essa cor; deixe em branco pra usar a cor automática do app. Genero, modalidades, Restrição Alimentar e Alergia a Medicamento têm uma lista pra escolher — clique na célula e selecione. Deixe Genero em branco se a equipe já for só de um gênero.`]},
     {tipo:'blank', cells:[]},
     {tipo:'header', cells:header},
   ];
-  const colWidths = [24, 14, 12, ...cols.mods.map(()=>10), 22, 26, 16, 20, 16, 20];
+  const colWidths = [24, 14, 30, 12, ...cols.mods.map(()=>10), 22, 26, 16, 20, 16, 20];
 
   /* Validação de dados (menu suspenso) para os campos com poucas opções fixas — Genero
      (Masculino/Feminino) e todo campo Sim/Não (cada modalidade, Restrição Alimentar,
@@ -7079,6 +7111,7 @@ function parseImportRows(header, rows){
   const idx = nomeCol => header.findIndex(h=> norm(h)===norm(nomeCol));
   const idxNome = idx('Nome');
   const idxEquipe = idx('Equipe');
+  const idxCor = header.findIndex(h=> norm(h).startsWith('cor')); // "Cor" ou "Cor (só se a Equipe ainda não existir)"
   const idxGenero = header.findIndex(h=> norm(h)==='genero' || norm(h)==='gênero');
   const idxLinguagem = header.findIndex(h=> norm(h).startsWith('linguagem'));
   const idxSinopse = header.findIndex(h=> norm(h).startsWith('sinopse'));
@@ -7093,7 +7126,7 @@ function parseImportRows(header, rows){
   }
 
   const modOptions = inscritoModalidadeOptions();
-  const colunasReservadas = new Set([idxNome, idxEquipe, idxGenero, idxLinguagem, idxSinopse, idxRestr, idxQuaisRestr, idxAlerg, idxQuaisAlerg, idxModalidadesCombo].filter(i=>i>=0));
+  const colunasReservadas = new Set([idxNome, idxEquipe, idxCor, idxGenero, idxLinguagem, idxSinopse, idxRestr, idxQuaisRestr, idxAlerg, idxQuaisAlerg, idxModalidadesCombo].filter(i=>i>=0));
   // No modelo, cada modalidade é sua própria coluna (Sim/Não) — identificadas comparando o
   // cabeçalho com os nomes de modalidade cadastrados agora (sempre atualizado).
   const modColunas = [];
@@ -7110,23 +7143,31 @@ function parseImportRows(header, rows){
     if(!nome) return; // linha em branco -- ignora sem contar como erro (não é "gente faltando")
 
     const equipeNome = String(cols[idxEquipe]||'').trim();
-    const team = STATE.teams.find(t=> norm(t.label)===norm(equipeNome));
-    if(!team){
-      plano.push({linha:linhaNum, nome, ok:false, erro:`Equipe "${equipeNome||'(vazio)'}" não encontrada`});
+    if(!equipeNome){
+      plano.push({linha:linhaNum, nome, ok:false, erro:'Equipe "(vazio)" não encontrada'});
       return;
     }
+    const team = STATE.teams.find(t=> norm(t.label)===norm(equipeNome));
+    // Se a Equipe não existe ainda, ela será CRIADA na importação (ver commitImportPlan)
+    // em vez de barrar a linha com erro -- antes disso, cadastrar Equipe por Equipe na
+    // mão antes de toda importação era um passo manual repetitivo (24 Equipes, uma por
+    // uma, só pra depois poder importar os alunos). `teamGenero` de uma Equipe nova
+    // sempre nasce 'X' (aceita os dois) -- por isso, igual a uma Equipe 'X' já
+    // existente, o gênero de cada aluno precisa vir explícito na planilha.
+    const novaEquipeCor = team ? null : resolverCorEquipe(idxCor>=0 ? cols[idxCor] : null);
 
     let genero = null, generoHerdadoDaEquipe = false;
     const generoTxt = idxGenero>=0 ? String(cols[idxGenero]||'').trim() : '';
     const gNorm = norm(generoTxt);
     if(gNorm==='feminino' || gNorm==='f') genero = 'F';
     else if(gNorm==='masculino' || gNorm==='m') genero = 'M';
-    else if(!gNorm && (team.genero==='M' || team.genero==='F')){
+    else if(!gNorm && team && (team.genero==='M' || team.genero==='F')){
       // planilha não especificou -- herda da equipe, já que ela só joga numa categoria
       genero = team.genero; generoHerdadoDaEquipe = true;
     }
     if(!genero){
-      plano.push({linha:linhaNum, nome, ok:false, erro:`Gênero não informado, e a equipe "${team.label}" aceita os dois — marque Masculino ou Feminino na planilha`});
+      const motivo = team ? `a equipe "${team.label}" aceita os dois` : `a equipe "${equipeNome}" ainda vai ser criada (aceita os dois por padrão)`;
+      plano.push({linha:linhaNum, nome, ok:false, erro:`Gênero não informado, e ${motivo} — marque Masculino ou Feminino na planilha`});
       return;
     }
 
@@ -7144,7 +7185,8 @@ function parseImportRows(header, rows){
     const temAlergia = idxAlerg>=0 && norm(cols[idxAlerg])==='sim';
 
     plano.push({
-      linha: linhaNum, nome, ok:true, teamId: team.id, teamLabel: team.label, genero, generoHerdadoDaEquipe,
+      linha: linhaNum, nome, ok:true, teamId: team ? team.id : null, teamLabel: team ? team.label : equipeNome,
+      novaEquipeCor, genero, generoHerdadoDaEquipe,
       modalidades: mods,
       restricaoAlimentar: temRestricao, restricoesAlimentares: temRestricao ? String(idxQuaisRestr>=0 ? cols[idxQuaisRestr]||'' : '').trim() : '',
       alergiaMedicamento: temAlergia, alergias: temAlergia ? String(idxQuaisAlerg>=0 ? cols[idxQuaisAlerg]||'' : '').trim() : '',
@@ -7241,7 +7283,27 @@ function openImportReviewModal(plano){
   pendingImportPlan = validos;
   const modOptions = inscritoModalidadeOptions();
   const body = document.getElementById('importReviewBody');
+  // Equipes que ainda não existem (teamId:null) e serão criadas ao confirmar -- uma por
+  // NOME (várias linhas podem apontar pra mesma Equipe nova), com a cor resolvida (se
+  // informada) pra já avisar antes de confirmar, não só depois.
+  const norm = s => normalizeSearchText(s||'').trim();
+  const equipesNovas = [];
+  const vistas = new Set();
+  validos.forEach(p=>{
+    if(p.teamId!=null) return;
+    const chave = norm(p.teamLabel);
+    if(vistas.has(chave)) return;
+    vistas.add(chave);
+    equipesNovas.push({label: p.teamLabel, cor: p.novaEquipeCor});
+  });
+
   let html = `<p class="hint">${validos.length} inscrito(s) prontos para importar${invalidos.length?`, ${invalidos.length} com problema (não serão importados agora)`:''}.</p>`;
+  if(equipesNovas.length){
+    html += `<div class="card" style="background:#f0f7ff; border-color:var(--navy); margin-bottom:10px;">
+      <p class="hint" style="color:var(--navy); margin:0 0 6px; font-weight:600;">🆕 ${equipesNovas.length} equipe(s) nova(s) será(ão) criada(s) ao confirmar:</p>
+      <p style="margin:0; font-size:13px;">${equipesNovas.map(e=>`<span class="chip" style="display:inline-flex; align-items:center; gap:5px; margin:2px 4px 2px 0;">${e.cor?`<span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${escPdf(e.cor)}; border:1px solid rgba(0,0,0,0.2);"></span>`:''}${escPdf(e.label)}${!e.cor?' <span class="hint">(cor automática)</span>':''}</span>`).join('')}</p>
+    </div>`;
+  }
   if(invalidos.length){
     html += `<div class="card" style="background:#fff3f3; border-color:var(--crimson,#C0392B); margin-bottom:10px;">
       <p class="hint" style="color:var(--crimson,#C0392B); margin:0 0 6px; font-weight:600;">Linhas não importadas — corrija na planilha e importe de novo:</p>
@@ -7255,7 +7317,8 @@ function openImportReviewModal(plano){
     <table><thead><tr><th>Nome</th><th>Equipe</th><th>Gênero</th><th>Modalidades</th><th>Restrição</th><th>Alergia</th></tr></thead><tbody>
     ${validos.map(p=>{
       const modLabels = p.modalidades.map(k=>{ const o = modOptions.find(x=>x.key===k); return o?o.label:k; }).join(', ') || '<span class="hint">—</span>';
-      return `<tr><td>${escPdf(p.nome)}</td><td>${escPdf(p.teamLabel)}</td><td>${p.genero==='F'?'Feminino':'Masculino'}${p.generoHerdadoDaEquipe?' <span class="hint">(da equipe)</span>':''}</td><td>${modLabels}</td><td>${p.restricaoAlimentar?escPdf(p.restricoesAlimentares||'Sim'):'<span class="hint">—</span>'}</td><td>${p.alergiaMedicamento?escPdf(p.alergias||'Sim'):'<span class="hint">—</span>'}</td></tr>`;
+      const equipeTxt = escPdf(p.teamLabel) + (p.teamId==null ? ' <span class="hint" title="Esta Equipe ainda não existe -- será criada">🆕</span>' : '');
+      return `<tr><td>${escPdf(p.nome)}</td><td>${equipeTxt}</td><td>${p.genero==='F'?'Feminino':'Masculino'}${p.generoHerdadoDaEquipe?' <span class="hint">(da equipe)</span>':''}</td><td>${modLabels}</td><td>${p.restricaoAlimentar?escPdf(p.restricoesAlimentares||'Sim'):'<span class="hint">—</span>'}</td><td>${p.alergiaMedicamento?escPdf(p.alergias||'Sim'):'<span class="hint">—</span>'}</td></tr>`;
     }).join('')}
     </tbody></table></div>`;
   }
@@ -7280,11 +7343,35 @@ function confirmImportReview(){
 }
 function commitImportPlan(plano){
   const norm = s => normalizeSearchText(s||'').trim();
-  let criados = 0, atualizados = 0, artisticasCriadas = 0;
+  let criados = 0, atualizados = 0, artisticasCriadas = 0, equipesCriadas = 0;
+
+  // Pré-passo: cria as Equipes que ainda não existem (ver parseImportRows -- linhas com
+  // teamId:null referenciam uma Equipe por criar, pelo NOME). Uma Equipe nova só é criada
+  // uma vez, mesmo que várias linhas da planilha apontem pra ela -- e confere de novo se
+  // ela já não existe (não só o que parseImportRows viu na hora da revisão), já que uma
+  // sincronização concorrente pode ter criado essa mesma Equipe entre a revisão e a
+  // confirmação. Sempre nasce com genero:'X' (aceita os dois) -- coerente com a
+  // exigência de gênero explícito por aluno que parseImportRows já faz nesse caso.
+  const equipeIdPorNomeNovo = new Map();
   plano.forEach(p=>{
-    let inscrito = STATE.inscritos.find(a=> a.teamId===p.teamId && norm(a.nome)===norm(p.nome));
+    if(p.teamId!=null) return;
+    const chave = norm(p.teamLabel);
+    if(equipeIdPorNomeNovo.has(chave)) return;
+    let team = STATE.teams.find(t=> norm(t.label)===chave);
+    if(!team){
+      team = {id: gerarIdEquipeUnico(p.teamLabel), label: p.teamLabel, genero: 'X', aglutinadorId: null};
+      if(p.novaEquipeCor) team.corManual = p.novaEquipeCor;
+      STATE.teams.push(team);
+      equipesCriadas++;
+    }
+    equipeIdPorNomeNovo.set(chave, team.id);
+  });
+
+  plano.forEach(p=>{
+    const teamId = p.teamId!=null ? p.teamId : equipeIdPorNomeNovo.get(norm(p.teamLabel));
+    let inscrito = STATE.inscritos.find(a=> a.teamId===teamId && norm(a.nome)===norm(p.nome));
     if(!inscrito){
-      inscrito = {id: nextInscritoId(), nome:p.nome, teamId:p.teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
+      inscrito = {id: nextInscritoId(), nome:p.nome, teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
         restricaoAlimentar:false, restricoesAlimentares:'', alergiaMedicamento:false, alergias:'', foto:'',
         consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()};
       STATE.inscritos.push(inscrito);
@@ -7312,10 +7399,10 @@ function commitImportPlan(plano){
     }
   });
   markDirty();
-  if(criados>0) registrarOperacao('inscrito_criado_lote', `${criados} inscrito(s) criado(s) por importação em lote`);
-  renderInscritosBody();
+  if(criados>0) registrarOperacao('inscrito_criado_lote', `${criados} inscrito(s) criado(s) por importação em lote${equipesCriadas?`, ${equipesCriadas} equipe(s) nova(s) criada(s) junto`:''}`);
+  if(equipesCriadas>0) renderInscricoes(); else renderInscritosBody(); // atualiza a lista de Equipes também, se alguma foi criada agora
   closeImportReviewModal();
-  showAlert(`Importação concluída!\n\n${criados} inscrito(s) novo(s) criado(s).\n${atualizados} inscrito(s) já existiam e tiveram dados atualizados.${artisticasCriadas?`\n${artisticasCriadas} apresentação(ões) artística(s) registrada(s).`:''}`);
+  showAlert(`Importação concluída!\n\n${equipesCriadas?`${equipesCriadas} equipe(s) nova(s) criada(s).\n`:''}${criados} inscrito(s) novo(s) criado(s).\n${atualizados} inscrito(s) já existiam e tiveram dados atualizados.${artisticasCriadas?`\n${artisticasCriadas} apresentação(ões) artística(s) registrada(s).`:''}`);
 }
 
 /* ===================== ALIMENTAÇÃO ===================== */
