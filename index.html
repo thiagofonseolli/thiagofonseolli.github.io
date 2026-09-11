@@ -185,13 +185,7 @@
   .edital-topic summary{justify-content:flex-start;}
   .edital-topic-editing{background:#FFFBEA;}
   .edital-topic-editing > summary{background:#FFF3C4;}
-  .edital-indice{border:1px solid var(--border); border-radius:8px; background:#fff; margin-bottom:4px;}
-  .edital-indice summary{cursor:pointer; padding:10px 14px; font-weight:700; color:var(--navy); background:var(--bg); list-style:none;}
-  .edital-indice summary::-webkit-details-marker{display:none;}
-  .edital-indice[open] summary{border-bottom:1px solid var(--border);}
-  .edital-indice-list{margin:0; padding:10px 14px 10px 34px; max-height:240px; overflow-y:auto; font-size:13px; line-height:1.7;}
-  .edital-toc-link{color:var(--navy); text-decoration:none; cursor:pointer;}
-  .edital-toc-link:hover{text-decoration:underline; color:var(--gold);}
+  .edital-content mark{background:#FFEB3B; color:inherit; padding:0 1px; border-radius:2px;}
 
   @media print{
     .topbar, .toolbar, .foot-note{display:none !important;}
@@ -1201,6 +1195,52 @@ let editalTopicSearchQuery = ''; // texto atual digitado na busca do Regulamento
 function normalizeSearchText(s){
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 }
+/* Monta uma regex que encontra o termo buscado dentro do texto ORIGINAL (com acento e
+   maiúsculas/minúsculas como realmente estão escritos), mesmo a busca em si sendo
+   insensível a acento e caixa (ver normalizeSearchText) -- cada letra "a/e/i/o/u/c" do
+   termo digitado vira uma classe de caracteres aceitando qualquer acentuação comum em
+   português, então buscar "regulamento" encontra e destaca "Regulamento" ou "règulamento"
+   do mesmo jeito. Retorna null se o termo estiver vazio (nada pra destacar). */
+const ACENTOS_DESTAQUE = {a:'[aàáâã]', e:'[eèéê]', i:'[iìíî]', o:'[oòóôõ]', u:'[uùúû]', c:'[cç]'};
+function construirRegexDestaque(query){
+  const normalizado = normalizeSearchText(query).trim();
+  if(!normalizado) return null;
+  const escapado = normalizado.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const flexivel = escapado.split('').map(ch => ACENTOS_DESTAQUE[ch] || ch).join('');
+  return new RegExp(flexivel, 'gi');
+}
+/* Envolve cada trecho do texto exibido que bate com a busca num <mark> (destaque
+   amarelo, ver CSS .edital-content mark). Só mexe em NÓS DE TEXTO (via TreeWalker),
+   nunca na estrutura de tags em si -- não tem como isso corromper HTML ou destacar algo
+   dentro do nome de uma tag por engano, mesmo que o termo buscado coincida com uma
+   palavra usada em algum atributo interno. */
+function destacarBuscaNoElemento(container, query){
+  if(!container) return;
+  const regex = construirRegexDestaque(query);
+  if(!regex) return;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  const nos = [];
+  let no;
+  while((no = walker.nextNode())) nos.push(no);
+  nos.forEach(textNode=>{
+    const texto = textNode.textContent;
+    regex.lastIndex = 0;
+    if(!regex.test(texto)) return;
+    regex.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let lastIndex = 0, m;
+    while((m = regex.exec(texto))){
+      if(m.index > lastIndex) frag.appendChild(document.createTextNode(texto.slice(lastIndex, m.index)));
+      const mark = document.createElement('mark');
+      mark.textContent = m[0];
+      frag.appendChild(mark);
+      lastIndex = m.index + m[0].length;
+      if(m[0].length===0) regex.lastIndex++; // guarda contra loop infinito num casamento vazio
+    }
+    if(lastIndex < texto.length) frag.appendChild(document.createTextNode(texto.slice(lastIndex)));
+    textNode.parentNode.replaceChild(frag, textNode);
+  });
+}
 /* Atrasa a execução de `fn` até `ms` ms sem uma nova chamada -- usado nos campos de
    busca que reconstroem uma lista grande (ex.: Inscritos, que já foi testado com até
    5000 registros, ver PROJETO.md) a cada letra digitada. Sem isso, cada tecla
@@ -1352,22 +1392,7 @@ function renderEditalAccordion(rawHtml){
   return out;
 }
 
-/* Constrói o índice/sumário clicável dos tópicos (respeitando a busca ativa, se houver). */
-function renderEditalIndiceHtml(rawHtml){
-  const {topics} = parseEditalTopics(rawHtml);
-  if(topics.length===0) return '';
-  const q = normalizeSearchText(editalTopicSearchQuery);
-  const itens = [];
-  topics.forEach((t, idx)=>{
-    if(!editalTopicMatchesQuery(t.title, t.bodyHtml, q)) return;
-    const displayTitle = t.title;
-    itens.push(`<li><a href="javascript:void(0)" class="edital-toc-link" data-topic-idx="${idx}">${idx+1}. ${escPdf(displayTitle)}</a></li>`);
-  });
-  if(itens.length===0){
-    return `<p class="hint" style="margin:6px 0;">Nenhum tópico encontrado para "${escPdf(editalTopicSearchQuery)}".</p>`;
-  }
-  return `<ol class="edital-indice-list">${itens.join('')}</ol>`;
-}
+
 
 async function ensureDefaults(s){
   if(!s.eventName) s.eventName = 'Torneio'; // fallback pra um backup antigo/incompleto sem nome de evento salvo — diferente do "Carregando…" usado em defaultState() (esse aqui é aplicado na hora, não é um estado transitório de espera)
@@ -9061,7 +9086,6 @@ function bindRegrasPontuacaoEvents(){
 
 /* ----- Regulamento (texto integral do edital) ----- */
 function renderRegulamentoIntegraContentHtml(){
-  const {topics} = parseEditalTopics(STATE.editalHtml);
   return `<div class="card">
     <h2>Edital / Regulamento — na íntegra</h2>
     <p class="hint">Documento original anexado, convertido para leitura aqui no painel. Os números de pontuação exibidos abaixo refletem a seção "Regras e Pontuação" desta aba.${isAdmin ? ' Use o botão "✏️ Editar regulamento" abaixo para reescrever o documento inteiro de uma vez.' : ''}</p>
@@ -9069,10 +9093,6 @@ function renderRegulamentoIntegraContentHtml(){
       <label class="f-label">🔎 Buscar no regulamento</label>
       <input type="text" id="editalTopicSearchInput" value="${escPdf(editalTopicSearchQuery)}" placeholder="Ex.: jogo limpo, xadrez, penalidade, uniforme..." style="width:100%;">
     </div>
-    <details class="edital-indice"${editalTopicSearchQuery ? ' open' : ''}>
-      <summary>📑 Índice — ${topics.length} tópico${topics.length===1?'':'s'}</summary>
-      <div id="editalIndiceBody">${renderEditalIndiceHtml(STATE.editalHtml)}</div>
-    </details>
     <div class="row" style="margin:12px 0;">
       <button class="btn secondary small" id="btnVisualizarEdital">👁️ Visualizar edital completo</button>
       <button class="btn secondary small" id="btnImprimirEdital">🖨️ Imprimir edital em PDF</button>
@@ -9081,16 +9101,12 @@ function renderRegulamentoIntegraContentHtml(){
     <div id="editalRegulamentoBody"><div class="edital-content">${renderEditalAccordion(STATE.editalHtml)}</div></div>
   </div>`;
 }
-/* Atualiza só o índice + a lista de tópicos (sem tocar no campo de busca), para digitar sem
-   perder o foco a cada letra. */
+/* Atualiza só a lista de tópicos (sem tocar no campo de busca), para digitar sem perder o
+   foco a cada letra. */
 function refreshEditalRegulamentoBody(){
-  const indiceBody = document.getElementById('editalIndiceBody');
-  if(indiceBody) indiceBody.innerHTML = renderEditalIndiceHtml(STATE.editalHtml);
   const body = document.getElementById('editalRegulamentoBody');
   if(body) body.innerHTML = `<div class="edital-content">${renderEditalAccordion(STATE.editalHtml)}</div>`;
-  const indiceDetails = document.querySelector('.edital-indice');
-  if(indiceDetails && editalTopicSearchQuery) indiceDetails.open = true;
-  bindEditalTopicDynamicEvents();
+  destacarBuscaNoElemento(body, editalTopicSearchQuery);
 }
 function bindRegulamentoIntegraEvents(){
   const btnVer = document.getElementById('btnVisualizarEdital');
@@ -9104,23 +9120,7 @@ function bindRegulamentoIntegraEvents(){
     editalTopicSearchQuery = e.target.value;
     refreshEditalRegulamentoBody();
   }, 200));
-
-  bindEditalTopicDynamicEvents();
-}
-/* Bindings dos links do índice — separados à parte porque precisam ser reaplicados sempre
-   que só essa área é atualizada (ex.: ao buscar). A edição de tópico deixou de existir
-   aqui dentro (ver abrirEditarRegulamentoModal, um único modal pro documento inteiro). */
-function bindEditalTopicDynamicEvents(){
-  document.querySelectorAll('.edital-toc-link').forEach(link=>{
-    link.addEventListener('click', (e)=>{
-      e.preventDefault();
-      const idx = link.dataset.topicIdx;
-      const alvo = document.getElementById('edital-topic-'+idx);
-      if(!alvo) return;
-      if(alvo.tagName==='DETAILS') alvo.open = true;
-      alvo.scrollIntoView({behavior:'smooth', block:'start'});
-    });
-  });
+  destacarBuscaNoElemento(document.getElementById('editalRegulamentoBody'), editalTopicSearchQuery); // cobre o caso de reabrir a aba com uma busca já digitada antes
 }
 
 /* ----- Editar o regulamento inteiro de uma vez (um único campo de texto) -----
