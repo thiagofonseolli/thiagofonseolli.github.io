@@ -3703,16 +3703,14 @@ function renderTabs(){
 /* Retorna as abas (TABS) reordenadas de acordo com a preferência do administrador,
    salva em STATE.tabOrder. Abas novas que ainda não constam em tabOrder (por exemplo,
    após uma atualização do app) aparecem no final, na ordem padrão.
-   Quem não está logado como administrador só vê "Painel", "Gerador de Tabela" (como
-   consulta -- ver renderGeradorTabela(), que já mostra a versão somente-leitura,
-   renderGtResumoHtml(), quando !isAdmin) e "Edital (Regulamento)" — as demais controlam
-   dados operacionais do evento (jogos, súmulas, inscrições etc.) que não são pra edição
-   nem consulta pública. */
+   Quem não está logado como administrador só vê "Painel" e "Edital (Regulamento)" — as
+   demais controlam dados operacionais do evento (jogos, súmulas, inscrições, gerador de
+   tabela etc.) que não são pra edição nem consulta pública. */
 function orderedTabs(){
   const byId = {}; TABS.forEach(t=> byId[t.id]=t);
   const ordered = (STATE.tabOrder||[]).map(id=> byId[id]).filter(Boolean);
   TABS.forEach(t=>{ if(!ordered.includes(t)) ordered.push(t); });
-  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='gerador' || t.id==='edital');
+  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='edital');
   return ordered;
 }
 
