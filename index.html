@@ -625,6 +625,7 @@
       <div class="field"><label class="f-label">Nome do inscrito</label><input type="text" id="editInscritoNome" style="width:220px;"></div>
       <div class="field"><label class="f-label">equipe</label><select id="editInscritoequipe"></select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="editInscritoGenero"><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+      <div class="field"><label class="f-label">Número no uniforme <span class="hint" style="margin:0;">(opcional)</span></label><input type="number" min="0" max="999" id="editInscritoNumeroUniforme" style="width:100px;"></div>
       <div class="field"><label class="f-label">Código (fixo)</label><input type="text" id="editInscritoCodigo" class="mono" disabled style="width:110px; opacity:0.65;"></div>
     </div>
     <div class="field" style="margin-top:10px;"><label class="f-label">Modalidades em que o inscrito está inscrito</label>
@@ -1662,6 +1663,19 @@ function abreviarNome(nomeCompleto){
     resultado.push(i%2===0 ? abrevia(unidades[i]) : unidades[i]); // alterna, começando abreviado
   }
   return resultado.join(' ');
+}
+/* Lê e normaliza o campo "Número no uniforme" de um formulário -- null se vazio (campo
+   opcional, não bloqueia o cadastro), ou um inteiro entre 0 e 999 caso contrário.
+   Qualquer valor fora desse intervalo ou não numérico também vira null, silenciosamente
+   -- não vale a pena travar o cadastro por causa de um campo que nem é obrigatório. */
+function lerNumeroUniforme(elementId){
+  const el = document.getElementById(elementId);
+  if(!el) return null;
+  const raw = el.value.trim();
+  if(!raw) return null;
+  const n = Number(raw);
+  if(!Number.isInteger(n) || n<0 || n>999) return null;
+  return n;
 }
 function uniqueStudentCode(){
   let code;
@@ -6272,6 +6286,7 @@ function renderInscritosContentHtml(){
       <div class="field"><label class="f-label">Nome do inscrito</label><input type="text" id="alNome" placeholder="Nome completo" style="width:220px;" ${adminDisabled()}><p class="hint" style="margin:2px 0 0;">Digite o nome completo — ele é abreviado automaticamente ao salvar (ex.: "Alice Pena Prado Xavier" → "A. Pena P. Xavier").</p></div>
       <div class="field"><label class="f-label">equipe</label><select id="alequipe" ${adminDisabled()}>${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="alGenero" ${adminDisabled()}><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
+      <div class="field"><label class="f-label">Número no uniforme <span class="hint" style="margin:0;">(opcional)</span></label><input type="number" min="0" max="999" id="alNumeroUniforme" placeholder="Ex.: 10" style="width:100px;" ${adminDisabled()}></div>
       <div class="field">
         <label class="f-label">Foto</label>
         <div class="row" style="align-items:center; gap:8px;">
@@ -6338,7 +6353,7 @@ function renderInscritosContentHtml(){
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="alExport">⬇️ Exportar lista (CSV)</button></div>
       ${isAdmin ? `<div class="field"><label class="f-label">&nbsp;</label><button class="btn secondary" id="alGerarCrachasLote">🪪 Gerar crachás em lote</button></div>` : ''}
     </div>
-    <table><thead><tr><th>Foto</th><th>Nome</th><th>equipe</th><th>Gênero</th><th>Código</th><th>Restrição alimentar</th><th>Alergia a medicamento</th><th>Modalidades</th><th>Crachá</th><th></th><th></th></tr></thead><tbody id="inscritosBody"></tbody></table>
+    <table><thead><tr><th>Foto</th><th>Nome</th><th>Nº</th><th>equipe</th><th>Gênero</th><th>Código</th><th>Restrição alimentar</th><th>Alergia a medicamento</th><th>Modalidades</th><th>Crachá</th><th></th><th></th></tr></thead><tbody id="inscritosBody"></tbody></table>
   </div>`;
 }
 function bindInscritosEvents(){
@@ -6395,6 +6410,7 @@ function bindInscritosEvents(){
       const nome = document.getElementById('alNome').value.trim();
       const teamId = document.getElementById('alequipe').value;
       const genero = document.getElementById('alGenero').value;
+      const numeroUniforme = lerNumeroUniforme('alNumeroUniforme');
       const mods = Array.from(document.querySelectorAll('.alModCheck:checked')).map(c=>c.value);
       const temRestricao = document.getElementById('alTemRestricao').value === 'sim';
       const restricoesAlimentares = temRestricao ? document.getElementById('alRestricoesTexto').value.trim() : '';
@@ -6417,7 +6433,7 @@ function bindInscritosEvents(){
       const criarInscrito = ()=>{
         const novoInscritoId = nextInscritoId();
         STATE.inscritos.push({
-          id:novoInscritoId, nome:nomeAbreviado, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
+          id:novoInscritoId, nome:nomeAbreviado, teamId, genero, numeroUniforme, modalidades:mods, codigo:uniqueStudentCode(),
           restricaoAlimentar: temRestricao, restricoesAlimentares,
           alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
           foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
@@ -6427,6 +6443,7 @@ function bindInscritosEvents(){
         alNovoFotoDataUrl = null;
         updateAlNovaFotoPreview();
         document.getElementById('alNome').value='';
+        document.getElementById('alNumeroUniforme').value='';
         document.querySelectorAll('.alModCheck').forEach(c=>c.checked=false);
         document.getElementById('alTemRestricao').value='nao'; document.getElementById('alRestricaoWrap').style.display='none'; document.getElementById('alRestricoesTexto').value='';
         document.getElementById('alTemAlergia').value='nao'; document.getElementById('alAlergiaWrap').style.display='none'; document.getElementById('alAlergiasTexto').value='';
@@ -6503,7 +6520,7 @@ function filteredInscritos(){
 function renderInscritosBody(){
   const body = document.getElementById('inscritosBody');
   const list = filteredInscritos();
-  if(list.length===0){ body.innerHTML = `<tr><td colspan="11" class="hint">Nenhum inscrito encontrado com esses filtros.</td></tr>`; return; }
+  if(list.length===0){ body.innerHTML = `<tr><td colspan="12" class="hint">Nenhum inscrito encontrado com esses filtros.</td></tr>`; return; }
   body.innerHTML = list.map(a=>{
     const fotoUrl = imgGet(a.foto);
     // Dado de saúde (LGPD Art. 5º/11 -- dado pessoal sensível): só quem realmente
@@ -6518,7 +6535,7 @@ function renderInscritosBody(){
       : podeVerSaude ? `🏥 ${escPdf(a.alergias)}` : '<span class="hint" title="Visível só pro admin ou representante desta Equipe">🏥 Não exibido</span>';
     return `<tr data-id="${a.id}">
     <td><button class="alFotoThumbBtn" ${adminDisabled()} title="${fotoUrl?'Alterar foto':'Adicionar foto'}" style="width:36px; height:36px; border-radius:7px; overflow:hidden; border:1px solid var(--border); background:var(--bg); padding:0; cursor:pointer; display:flex; align-items:center; justify-content:center;">${fotoUrl?`<img src="${fotoUrl}" alt="Foto de ${escPdf(a.nome)}" loading="lazy" style="width:100%; height:100%; object-fit:cover;">`:'<span style="font-size:14px;">📷</span>'}</button></td>
-    <td>${escPdf(a.nome)}</td><td>${teamChip(a.teamId, a.genero)}</td>
+    <td>${escPdf(a.nome)}</td><td class="mono">${a.numeroUniforme!=null?a.numeroUniforme:'<span class="hint">—</span>'}</td><td>${teamChip(a.teamId, a.genero)}</td>
     <td>${a.genero==='F'?'Feminino':a.genero==='M'?'Masculino':'<span class="hint">—</span>'}</td>
     <td class="mono">${escPdf(a.codigo||'—')}</td>
     <td>${restricaoHtml}</td>
@@ -6579,6 +6596,7 @@ function openEditInscritoModal(id){
 
   document.getElementById('editInscritoNome').value = a.nome;
   document.getElementById('editInscritoGenero').value = a.genero || 'F';
+  document.getElementById('editInscritoNumeroUniforme').value = a.numeroUniforme!=null ? a.numeroUniforme : '';
   document.getElementById('editInscritoCodigo').value = a.codigo || '—';
 
   const modOptions = inscritoModalidadeOptions();
@@ -6612,6 +6630,7 @@ function saveEditInscritoModal(){
   const nome = document.getElementById('editInscritoNome').value.trim();
   const teamId = document.getElementById('editInscritoequipe').value;
   const genero = document.getElementById('editInscritoGenero').value;
+  const numeroUniforme = lerNumeroUniforme('editInscritoNumeroUniforme');
   const mods = Array.from(document.querySelectorAll('.editAlModCheck:checked')).map(c=>c.value);
   const temRestricao = document.getElementById('editInscritoTemRestricao').value === 'sim';
   const restricoesAlimentares = temRestricao ? document.getElementById('editInscritoRestricoesTexto').value.trim() : '';
@@ -6626,6 +6645,7 @@ function saveEditInscritoModal(){
   a.nome = abreviarNome(nome); // por segurança -- ver abreviarNome()
   a.teamId = teamId;
   a.genero = genero;
+  a.numeroUniforme = numeroUniforme;
   a.modalidades = mods;
   a.restricaoAlimentar = temRestricao;
   a.restricoesAlimentares = restricoesAlimentares;
@@ -7114,7 +7134,7 @@ function colunasImportacao(){
   return {
     fixas: ['Nome','Equipe','Cor (só se a Equipe ainda não existir)','Genero'],
     mods,
-    extras: ['Linguagem Artística (se marcar Artística)','Sinopse (se marcar Artística)','Restrição Alimentar','Quais Restrições','Alergia a Medicamento','Quais Alergias'],
+    extras: ['Numero no Uniforme (opcional)','Linguagem Artística (se marcar Artística)','Sinopse (se marcar Artística)','Restrição Alimentar','Quais Restrições','Alergia a Medicamento','Quais Alergias'],
   };
 }
 function gerarModeloImportacaoXlsx(){
@@ -7123,11 +7143,11 @@ function gerarModeloImportacaoXlsx(){
   const equipesRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
   const sections = [
     {tipo:'titulo', cells:[`Ficha de Inscrição — ${STATE.eventName}`]},
-    {tipo:'instrucoes', cells:[`${equipesRef}. Se o nome em "Equipe" não bater com nenhuma já cadastrada, uma Equipe nova é criada automaticamente na importação -- preencha "Cor" nesse caso (nome em português como "Vermelho"/"Azul Marinho", ou um código hex como "#FF0000") para já nascer com essa cor; deixe em branco pra usar a cor automática do app. Genero, modalidades, Restrição Alimentar e Alergia a Medicamento têm uma lista pra escolher — clique na célula e selecione. Deixe Genero em branco se a equipe já for só de um gênero.`]},
+    {tipo:'instrucoes', cells:[`${equipesRef}. Se o nome em "Equipe" não bater com nenhuma já cadastrada, uma Equipe nova é criada automaticamente na importação -- preencha "Cor" nesse caso (nome em português como "Vermelho"/"Azul Marinho", ou um código hex como "#FF0000") para já nascer com essa cor; deixe em branco pra usar a cor automática do app. Genero, modalidades, Restrição Alimentar e Alergia a Medicamento têm uma lista pra escolher — clique na célula e selecione. Deixe Genero em branco se a equipe já for só de um gênero. "Numero no Uniforme" é opcional (0 a 999) -- ajuda a arbitragem a identificar rapidamente cada jogador na hora de lançar a súmula; deixe em branco se ainda não tiver essa informação.`]},
     {tipo:'blank', cells:[]},
     {tipo:'header', cells:header},
   ];
-  const colWidths = [24, 14, 30, 12, ...cols.mods.map(()=>10), 22, 26, 16, 20, 16, 20];
+  const colWidths = [24, 14, 30, 12, ...cols.mods.map(()=>10), 14, 22, 26, 16, 20, 16, 20];
 
   /* Validação de dados (menu suspenso) para os campos com poucas opções fixas — Genero
      (Masculino/Feminino) e todo campo Sim/Não (cada modalidade, Restrição Alimentar,
@@ -7295,6 +7315,7 @@ function parseImportRows(header, rows){
   const idxEquipe = idx('Equipe');
   const idxCor = header.findIndex(h=> norm(h).startsWith('cor')); // "Cor" ou "Cor (só se a Equipe ainda não existir)"
   const idxGenero = header.findIndex(h=> norm(h)==='genero' || norm(h)==='gênero');
+  const idxNumero = header.findIndex(h=> norm(h).startsWith('numero') || norm(h).startsWith('número'));
   const idxLinguagem = header.findIndex(h=> norm(h).startsWith('linguagem'));
   const idxSinopse = header.findIndex(h=> norm(h).startsWith('sinopse'));
   const idxRestr = header.findIndex(h=> norm(h)==='restricaoalimentar' || norm(h)==='restricao alimentar');
@@ -7308,7 +7329,7 @@ function parseImportRows(header, rows){
   }
 
   const modOptions = inscritoModalidadeOptions();
-  const colunasReservadas = new Set([idxNome, idxEquipe, idxCor, idxGenero, idxLinguagem, idxSinopse, idxRestr, idxQuaisRestr, idxAlerg, idxQuaisAlerg, idxModalidadesCombo].filter(i=>i>=0));
+  const colunasReservadas = new Set([idxNome, idxEquipe, idxCor, idxGenero, idxNumero, idxLinguagem, idxSinopse, idxRestr, idxQuaisRestr, idxAlerg, idxQuaisAlerg, idxModalidadesCombo].filter(i=>i>=0));
   // No modelo, cada modalidade é sua própria coluna (Sim/Não) — identificadas comparando o
   // cabeçalho com os nomes de modalidade cadastrados agora (sempre atualizado).
   const modColunas = [];
@@ -7365,10 +7386,20 @@ function parseImportRows(header, rows){
 
     const temRestricao = idxRestr>=0 && norm(cols[idxRestr])==='sim';
     const temAlergia = idxAlerg>=0 && norm(cols[idxAlerg])==='sim';
+    // Opcional -- não trava a linha se vier vazio ou com algo que não é um número válido
+    // (0 a 999), mesmo critério já usado em lerNumeroUniforme() nos formulários manuais.
+    let numeroUniforme = null;
+    if(idxNumero>=0){
+      const numTxt = String(cols[idxNumero]||'').trim();
+      if(numTxt){
+        const n = Number(numTxt);
+        if(Number.isInteger(n) && n>=0 && n<=999) numeroUniforme = n;
+      }
+    }
 
     plano.push({
       linha: linhaNum, nome, ok:true, teamId: team ? team.id : null, teamLabel: team ? team.label : equipeNome,
-      novaEquipeCor, genero, generoHerdadoDaEquipe,
+      novaEquipeCor, genero, generoHerdadoDaEquipe, numeroUniforme,
       modalidades: mods,
       restricaoAlimentar: temRestricao, restricoesAlimentares: temRestricao ? String(idxQuaisRestr>=0 ? cols[idxQuaisRestr]||'' : '').trim() : '',
       alergiaMedicamento: temAlergia, alergias: temAlergia ? String(idxQuaisAlerg>=0 ? cols[idxQuaisAlerg]||'' : '').trim() : '',
@@ -7694,11 +7725,11 @@ function openImportReviewModal(plano){
   }
   if(validos.length){
     html += `<div style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:6px;">
-    <table><thead><tr><th>Nome</th><th>Equipe</th><th>Gênero</th><th>Modalidades</th><th>Restrição</th><th>Alergia</th></tr></thead><tbody>
+    <table><thead><tr><th>Nome</th><th>Nº</th><th>Equipe</th><th>Gênero</th><th>Modalidades</th><th>Restrição</th><th>Alergia</th></tr></thead><tbody>
     ${validos.map(p=>{
       const modLabels = p.modalidades.map(k=>{ const o = modOptions.find(x=>x.key===k); return o?o.label:k; }).join(', ') || '<span class="hint">—</span>';
       const equipeTxt = escPdf(p.teamLabel) + (p.teamId==null ? ' <span class="hint" title="Esta Equipe ainda não existe -- será criada">🆕</span>' : '');
-      return `<tr><td>${escPdf(p.nome)}</td><td>${equipeTxt}</td><td>${p.genero==='F'?'Feminino':'Masculino'}${p.generoHerdadoDaEquipe?' <span class="hint">(da equipe)</span>':''}</td><td>${modLabels}</td><td>${p.restricaoAlimentar?escPdf(p.restricoesAlimentares||'Sim'):'<span class="hint">—</span>'}</td><td>${p.alergiaMedicamento?escPdf(p.alergias||'Sim'):'<span class="hint">—</span>'}</td></tr>`;
+      return `<tr><td>${escPdf(p.nome)}</td><td class="mono">${p.numeroUniforme!=null?p.numeroUniforme:'<span class="hint">—</span>'}</td><td>${equipeTxt}</td><td>${p.genero==='F'?'Feminino':'Masculino'}${p.generoHerdadoDaEquipe?' <span class="hint">(da equipe)</span>':''}</td><td>${modLabels}</td><td>${p.restricaoAlimentar?escPdf(p.restricoesAlimentares||'Sim'):'<span class="hint">—</span>'}</td><td>${p.alergiaMedicamento?escPdf(p.alergias||'Sim'):'<span class="hint">—</span>'}</td></tr>`;
     }).join('')}
     </tbody></table></div>`;
   }
@@ -7755,7 +7786,7 @@ function commitImportPlan(plano){
     // completo digitado na planilha nunca bate com o nome abreviado já salvo).
     let inscrito = STATE.inscritos.find(a=> a.teamId===teamId && norm(a.nome)===norm(nomeAbreviado));
     if(!inscrito){
-      inscrito = {id: nextInscritoId(), nome:nomeAbreviado, teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
+      inscrito = {id: nextInscritoId(), nome:nomeAbreviado, teamId, genero:p.genero, numeroUniforme:p.numeroUniforme, modalidades:[], codigo: uniqueStudentCode(),
         restricaoAlimentar:false, restricoesAlimentares:'', alergiaMedicamento:false, alergias:'', foto:'',
         consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()};
       STATE.inscritos.push(inscrito);
@@ -7765,6 +7796,10 @@ function commitImportPlan(plano){
     }
     p.modalidades.forEach(k=>{ if(!inscrito.modalidades.includes(k)) inscrito.modalidades.push(k); });
     if(!inscrito.genero) inscrito.genero = p.genero;
+    // Só atualiza se a planilha realmente trouxe um número (célula em branco não apaga
+    // um número já cadastrado direto no app -- mesmo critério já usado pra restrição
+    // alimentar/alergia logo abaixo, que também só ATUALIZA quando vem preenchido).
+    if(p.numeroUniforme!=null) inscrito.numeroUniforme = p.numeroUniforme;
     if(p.restricaoAlimentar){ inscrito.restricaoAlimentar = true; if(p.restricoesAlimentares) inscrito.restricoesAlimentares = p.restricoesAlimentares; }
     if(p.alergiaMedicamento){ inscrito.alergiaMedicamento = true; if(p.alergias) inscrito.alergias = p.alergias; }
 
@@ -8624,7 +8659,7 @@ function buildGameDetailHtml(gameId){
     sumula.eventos.slice().reverse().map(ev=>{
       const inscrito = STATE.inscritos.find(a=>a.id===ev.studentId);
       const teamId = ev.teamSide==='A'?game.teamA:game.teamB;
-      return `<tr data-evid="${ev.id}"><td>${inscrito?escPdf(inscrito.nome):'Inscrito removido'}</td><td>${teamChip(teamId, game.genero)}</td><td>${escPdf(tipoInfo(ev.tipo, game.modalidade).label)}</td>
+      return `<tr data-evid="${ev.id}"><td>${inscrito?(inscrito.numeroUniforme!=null?`<span class="mono">#${inscrito.numeroUniforme}</span> `:'')+escPdf(inscrito.nome):'Inscrito removido'}</td><td>${teamChip(teamId, game.genero)}</td><td>${escPdf(tipoInfo(ev.tipo, game.modalidade).label)}</td>
         <td class="mono">${new Date(ev.ts).toLocaleTimeString('pt-BR')}</td>
         <td>${isAdmin?`<button class="btn danger small removeEvento" aria-label="Remover lançamento de ${escPdf(tipoInfo(ev.tipo, game.modalidade).label)} de ${inscrito?escPdf(inscrito.nome):'inscrito removido'}">✕</button>`:''}</td></tr>`;
     }).join('') + `</tbody></table>`;
@@ -8640,8 +8675,9 @@ function buildGameDetailHtml(gameId){
       const podeVerSaude = isAdmin || (accessoEquipeId && accessoEquipeId===a.teamId);
       const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
       const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
+      const numeroTag = a.numeroUniforme!=null ? `<span class="mono" style="font-weight:700; color:var(--navy); margin-right:6px;">#${a.numeroUniforme}</span>` : '';
       return `<div class="game-card" data-inscrito="${a.id}" data-side="${side}">
-      <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
+      <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${numeroTag}${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
       <div class="pill-group">
         ${tiposModalidade.map(tipo=>{
           const count = sumula.eventos.filter(e=>e.studentId===a.id && e.tipo===tipo.key).length;
@@ -9786,6 +9822,7 @@ function renderAcessoEquipeView(){
     <div class="row">
       <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;" value="${editando?escPdf(editando.nome):''}">${!editando?'<p class="hint" style="margin:2px 0 0;">Digite o nome completo — ele é abreviado automaticamente ao salvar (ex.: "Alice Pena Prado Xavier" → "A. Pena P. Xavier").</p>':''}</div>
       <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F" ${editando&&editando.genero==='F'?'selected':''}>Feminino</option><option value="M" ${editando&&editando.genero==='M'?'selected':''}>Masculino</option></select></div>
+      <div class="field"><label class="f-label">Número no uniforme <span class="hint" style="margin:0;">(opcional)</span></label><input type="number" min="0" max="999" id="aeNumeroUniforme" style="width:100px;" value="${editando&&editando.numeroUniforme!=null?editando.numeroUniforme:''}"></div>
       <div class="field">
         <label class="f-label">Foto</label>
         <div class="row" style="align-items:center; gap:8px;">
@@ -9897,6 +9934,7 @@ function renderAcessoEquipeView(){
   document.getElementById('aeAdd').addEventListener('click', ()=>{
     const nome = document.getElementById('aeNome').value.trim();
     const genero = document.getElementById('aeGenero').value;
+    const numeroUniforme = lerNumeroUniforme('aeNumeroUniforme');
     const mods = Array.from(document.querySelectorAll('.aeModCheck:checked')).map(c=>c.value);
     const temRestricao = document.getElementById('aeTemRestricao').value === 'sim';
     const restricoesAlimentares = temRestricao ? document.getElementById('aeRestricoesTexto').value.trim() : '';
@@ -9930,7 +9968,7 @@ function renderAcessoEquipeView(){
         // dela — confirmado com teste).
         const alvoAtual = STATE.inscritos.find(a=>a.id===idAlvo);
         if(!alvoAtual){ showAlert('Esse inscrito não existe mais nesta Equipe (pode ter sido removido). A edição foi cancelada.'); aeEditandoId=null; renderAcessoEquipeView(); return; }
-        alvoAtual.nome = nomeAbreviado; alvoAtual.genero = genero; alvoAtual.modalidades = mods;
+        alvoAtual.nome = nomeAbreviado; alvoAtual.genero = genero; alvoAtual.numeroUniforme = numeroUniforme; alvoAtual.modalidades = mods;
         alvoAtual.restricaoAlimentar = temRestricao; alvoAtual.restricoesAlimentares = restricoesAlimentares;
         alvoAtual.alergiaMedicamento = temAlergia; alvoAtual.alergias = alergiasMedicamento;
         aeEditandoId = null;
@@ -9949,7 +9987,7 @@ function renderAcessoEquipeView(){
     const criarInscrito = ()=>{
       const novoInscritoId = nextInscritoId();
       STATE.inscritos.push({
-        id:novoInscritoId, nome:nomeAbreviado, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
+        id:novoInscritoId, nome:nomeAbreviado, teamId:team.id, genero, numeroUniforme, modalidades:mods, codigo:uniqueStudentCode(),
         restricaoAlimentar: temRestricao, restricoesAlimentares,
         alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
         foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
