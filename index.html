@@ -3934,13 +3934,13 @@ function renderJogos(){
       </div>
       <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--border);">
         <p class="f-label" style="margin-bottom:8px;">Variáveis cadastradas por modalidade</p>
-        <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar aparecem com um "✕" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
+        <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar têm um botão "✕ Remover" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
         ${STATE.modalidades.length===0 ? '<p class="hint">Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".</p>' : STATE.modalidades.map(mod=>{
           const tipos = sumulaTiposDaModalidade(mod);
           return `<div style="margin-bottom:10px;">
             <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
             <div class="pill-group">
-              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:6px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="danger removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover esta variável" aria-label="Remover a variável ${escPdf(t.label)}" style="border:none; background:none; color:var(--crimson,#C0392B); cursor:pointer; font-weight:700; padding:0; line-height:1;">✕</button>` : ''}</span>`).join('')}
+              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:8px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="btn danger small removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" aria-label="Remover a variável ${escPdf(t.label)} de ${escPdf(mod)}">✕ Remover</button>` : ''}</span>`).join('')}
             </div>
           </div>`;
         }).join('')}
