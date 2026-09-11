@@ -3703,14 +3703,16 @@ function renderTabs(){
 /* Retorna as abas (TABS) reordenadas de acordo com a preferência do administrador,
    salva em STATE.tabOrder. Abas novas que ainda não constam em tabOrder (por exemplo,
    após uma atualização do app) aparecem no final, na ordem padrão.
-   Quem não está logado como administrador só vê "Painel" e "Edital (Regulamento)" — as
-   demais controlam dados operacionais do evento (jogos, súmulas, inscrições, gerador de
-   tabela etc.) que não são pra edição nem consulta pública. */
+   Quem não está logado como administrador vê "Painel", "Jogos" (só consulta — o resumo
+   de cada partida aparece normalmente, mas não dá pra expandir pra ver a súmula/
+   escalação/ferramentas administrativas, ver gameRowHtml()) e "Edital (Regulamento)" —
+   as demais controlam dados operacionais do evento (súmulas de verdade, inscrições,
+   gerador de tabela etc.) que não são pra edição nem consulta pública. */
 function orderedTabs(){
   const byId = {}; TABS.forEach(t=> byId[t.id]=t);
   const ordered = (STATE.tabOrder||[]).map(id=> byId[id]).filter(Boolean);
   TABS.forEach(t=>{ if(!ordered.includes(t)) ordered.push(t); });
-  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='edital');
+  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='jogos' || t.id==='edital');
   return ordered;
 }
 
@@ -4091,7 +4093,7 @@ function openGradeDiaModal(){
       <table><thead><tr><th>Data</th><th>Hora</th><th>Local</th><th>Modalidade</th><th>Partida</th><th>Status</th></tr></thead><tbody>
       ${jogos.map(g=>{
         const statusInfo = gameStatusInfo(g);
-        return `<tr class="gradeDiaRow" data-id="${g.id}" style="cursor:pointer;">
+        return `<tr class="gradeDiaRow" data-id="${g.id}" ${isAdmin?'style="cursor:pointer;"':''}>
           <td class="mono">${g.data.split('-').reverse().join('/')}</td>
           <td class="mono">${escPdf(g.hora)}</td>
           <td>${escPdf(g.local)}</td>
@@ -4104,7 +4106,10 @@ function openGradeDiaModal(){
     </div>`;
   }
   document.getElementById('gradeDiaModal').classList.add('open');
-  document.querySelectorAll('.gradeDiaRow').forEach(row=>{
+  // Navegar daqui pra abrir o painel de detalhes de um jogo também só faz sentido pra
+  // admin (o painel em si já não é renderizado pra quem não é, ver gameRowHtml -- isso
+  // aqui só evita um clique "morto", sem efeito visível nenhum, na versão de consulta).
+  if(isAdmin) document.querySelectorAll('.gradeDiaRow').forEach(row=>{
     row.addEventListener('click', ()=>{
       const id = Number(row.dataset.id);
       closeGradeDiaModal();
@@ -4184,9 +4189,14 @@ function gameRowHtml(g){
   const done = statusInfo.status==='concluido';
   const nLancamentos = (STATE.sumulas[g.id]?.eventos||[]).length;
   const placarTxt = g.wo ? 'W.O.' : (done ? `${g.scoreA??0} × ${g.scoreB??0}` : 'vs');
-  const expanded = expandedGameId===g.id;
+  // Painel de detalhes (súmula, escalação, lançamentos) só é MONTADO se isAdmin -- não é
+  // só uma questão de esconder o botão de abrir. `expandedGameId` pode ter sido setado
+  // por mais de uma rota (o clique no próprio card, ou clicar numa linha da "Grade do
+  // dia") -- checar isAdmin bem aqui, no ponto que decide o que É RENDERIZADO, cobre as
+  // duas de uma vez, em vez de precisar lembrar de bloquear cada rota separadamente.
+  const expanded = expandedGameId===g.id && isAdmin;
   return `<div class="game-card game-row" data-id="${g.id}">
-    <div class="game-row-summary" style="cursor:pointer;">
+    <div class="game-row-summary" ${isAdmin?'style="cursor:pointer;"':''}>
       <div class="game-row-info">
         <span class="badge">${escPdf(g.modalidade)} · ${generoJogoLabel(g.genero)}</span>
         <span class="game-row-teams">${teamChip(g.teamA, g.genero)} <span class="mono" style="font-weight:700; font-size:13px;">${placarTxt}</span> ${teamChip(g.teamB, g.genero)}</span>
@@ -4197,7 +4207,7 @@ function gameRowHtml(g){
         ${nLancamentos>0 ? `<span class="badge">${nLancamentos} lanç.</span>` : ''}
         <span class="badge ${done?'done':''} ${statusInfo.status==='ao_vivo'?'live':''}">${statusInfo.label}</span>
         ${isAdmin?'<button class="btn danger small removeGame" title="Remover partida" aria-label="Remover esta partida">✕</button>':''}
-        <span class="expand-chevron">${expanded?'▾':'▸'}</span>
+        ${isAdmin?`<span class="expand-chevron">${expanded?'▾':'▸'}</span>`:''}
       </div>
     </div>
     ${expanded ? `<div class="game-row-panel">${buildGameDetailHtml(g.id)}</div>` : ''}
@@ -4223,7 +4233,12 @@ function renderGameSummaryRow(id){
 function wireGameRowEvents(id, card){
   const summary = card.querySelector('.game-row-summary');
   const removeBtn = card.querySelector('.removeGame');
-  summary.addEventListener('click', (e)=>{
+  // Clique pra expandir/recolher o painel de detalhes (súmula, escalação) só existe pra
+  // admin -- pra quem não é, a linha mostra só o resumo (placar, data, local, status),
+  // sem nenhuma ação de clique. A proteção "de verdade" (não deixar o conteúdo do painel
+  // sequer ser montado) já está em gameRowHtml(); isso aqui só evita anexar um clique
+  // que não levaria a nada visível mesmo se disparado.
+  if(isAdmin) summary.addEventListener('click', (e)=>{
     if(e.target.closest('.removeGame')) return;
     expandedGameId = (expandedGameId===id) ? null : id;
     renderGamesList();
