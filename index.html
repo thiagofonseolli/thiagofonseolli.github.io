@@ -223,6 +223,7 @@
           <button id="btnClearData" style="display:none;">🧹 Limpar dados</button>
           <button id="btnSolicitacoesPrivacidade" style="display:none;">🔒 Solicitações de privacidade (LGPD)</button>
           <button id="btnEliminarDadosSensiveis" style="display:none;">🗑️ Eliminar dados de saúde e fotos (LGPD)</button>
+          <button id="btnAbreviarNomes" style="display:none;">🔒 Abreviar nomes de todos os inscritos</button>
         </div>
       </div>
     </div>
@@ -1589,6 +1590,53 @@ function generateStudentCode(){
   let chars = (pick(letters,4)+pick(digits,4)).split('');
   for(let i=chars.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [chars[i],chars[j]]=[chars[j],chars[i]]; }
   return chars.join('');
+}
+/* Abrevia um nome completo por segurança/privacidade, seguindo o padrão pedido: primeira
+   letra do primeiro nome, o primeiro sobrenome por extenso, e os demais nomes (se houver)
+   alternando entre abreviado e por extenso, começando abreviado. Ex.: "Alice Pena Prado
+   Xavier" -> "A. Pena P. Xavier". Isso é aplicado ao NOME DE VERDADE, na criação e edição
+   de qualquer inscrito -- o nome completo não fica salvo em lugar nenhum depois disso (é
+   uma decisão deliberada, não um mascaramento reversível na exibição).
+
+   Conectivos comuns ("de", "da", "do", "das", "dos", "e") ficam GRUDADOS na palavra
+   seguinte, formando uma única unidade de sobrenome (ex.: "de Souza" conta como um nome
+   só, nunca dois) -- soa mais natural que separar "de" como se fosse um nome próprio.
+   Quando essa unidade cai numa posição abreviada, só a palavra principal é abreviada,
+   o conectivo continua escrito por extenso (ex.: "de Souza" abreviado vira "de S.").
+
+   Um nome com uma palavra só (sem nenhum sobrenome) fica como está -- não há o que
+   abreviar sem perder a pessoa por completo. A função é idempotente: aplicar de novo
+   num nome que já passou por ela produz o mesmo resultado (útil pra reaplicar em massa
+   sem se preocupar em detectar o que já foi convertido antes). */
+function abreviarNome(nomeCompleto){
+  const CONECTIVOS = new Set(['de','da','do','das','dos','e']);
+  const palavras = String(nomeCompleto||'').trim().split(/\s+/).filter(Boolean);
+  if(palavras.length <= 1) return palavras.join(' ');
+
+  // Agrupa conectivo+palavra seguinte numa única unidade ("de Souza" vira 1 unidade).
+  const unidades = [];
+  for(let i=0;i<palavras.length;i++){
+    if(CONECTIVOS.has(palavras[i].toLowerCase()) && i+1<palavras.length){
+      unidades.push(palavras[i] + ' ' + palavras[i+1]);
+      i++;
+    } else {
+      unidades.push(palavras[i]);
+    }
+  }
+
+  function abrevia(unidade){
+    const partes = unidade.split(' ');
+    const principal = partes[partes.length-1];
+    const inicial = principal.charAt(0).toUpperCase() + '.';
+    return partes.length>1 ? partes[0] + ' ' + inicial : inicial;
+  }
+
+  const resultado = [abrevia(unidades[0])]; // primeiro nome: sempre abreviado
+  if(unidades.length>1) resultado.push(unidades[1]); // primeiro sobrenome: sempre por extenso
+  for(let i=2;i<unidades.length;i++){
+    resultado.push(i%2===0 ? abrevia(unidades[i]) : unidades[i]); // alterna, começando abreviado
+  }
+  return resultado.join(' ');
 }
 function uniqueStudentCode(){
   let code;
@@ -3097,6 +3145,7 @@ const REGISTRO_OPERACAO_LABEL = {
   login_admin: 'Login de admin', inscrito_criado: 'Inscrito criado', inscrito_criado_lote: 'Inscritos criados (lote)',
   inscrito_removido: 'Inscrito removido', backup_exportado: 'Backup exportado',
   solicitacao_privacidade_atendida: 'Solicitação de privacidade atendida', eliminacao_dados_sensiveis: 'Dados sensíveis eliminados (retenção)',
+  nomes_abreviados_lote: 'Nomes abreviados em lote',
   solicitacoes_privacidade_limpas: 'Solicitações de privacidade antigas apagadas',
 };
 function renderRegistroOperacoesBody(){
@@ -3151,6 +3200,39 @@ function eliminarDadosSensiveis(){
   markDirty();
   renderAll();
   showAlert(`Pronto. Foto e dado de saúde eliminados de ${qtd} inscrito(s). Nome, Equipe, modalidades e resultados continuam intactos.`);
+}
+
+/* Aplica abreviarNome() de verdade (não é uma exibição alternativa -- o nome completo é
+   substituído no cadastro) a TODOS os inscritos já existentes, de uma vez -- pedido
+   explícito pra dar mais segurança às informações do app. A partir daí, qualquer edição
+   ou nova importação já sai abreviada por conta própria (ver os pontos de criação/edição
+   de inscrito); esta ação só cobre quem já estava cadastrado ANTES dessa mudança.
+   Idempotente (ver comentário de abreviarNome()) -- rodar de novo em quem já foi
+   abreviado não estraga nada, então não precisa de nenhuma checagem de "já foi
+   convertido?" antes de aplicar. Irreversível: o nome completo original não fica salvo
+   em lugar nenhum depois disso -- por isso exige senha de admin antes de confirmar,
+   mesmo padrão de "Eliminar dados de saúde e fotos". */
+function iniciarAbreviarNomes(){
+  if(!isAdmin) return;
+  const qtd = STATE.inscritos.length;
+  if(qtd===0){ showAlert('Nenhum inscrito cadastrado no momento.'); return; }
+  pedirSenhaAdmin('Confirme sua senha', `Essa ação abrevia o nome de TODOS os ${qtd} inscrito(s) cadastrado(s) agora (ex.: "Alice Pena Prado Xavier" vira "A. Pena P. Xavier") -- em todo lugar do app, inclusive no crachá. O nome completo original não fica salvo em lugar nenhum depois disso.`).then(senha=>{
+    if(!senha) return; // cancelado
+    showConfirm(`Abreviar o nome de ${qtd} inscrito(s)? Essa ação não pode ser desfeita.`, ()=>{
+      abreviarNomesExistentes();
+    });
+  });
+}
+function abreviarNomesExistentes(){
+  let qtd = 0;
+  STATE.inscritos.forEach(a=>{
+    const abreviado = abreviarNome(a.nome);
+    if(abreviado !== a.nome){ a.nome = abreviado; qtd++; }
+  });
+  registrarOperacao('nomes_abreviados_lote', `Nome abreviado de ${qtd} inscrito(s) já cadastrado(s)`);
+  markDirty();
+  renderAll();
+  showAlert(`Pronto. Nome abreviado de ${qtd} inscrito(s). Os demais já estavam abreviados ou têm uma única palavra no nome.`);
 }
 
 
@@ -3434,6 +3516,8 @@ function renderHeaderBlock(){
   }
   const eliminarSensiveisBtn = document.getElementById('btnEliminarDadosSensiveis');
   if(eliminarSensiveisBtn) eliminarSensiveisBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  const abreviarNomesBtn = document.getElementById('btnAbreviarNomes');
+  if(abreviarNomesBtn) abreviarNomesBtn.style.display = isAdmin ? 'inline-block' : 'none';
   const adminDivider = document.getElementById('adminOnlyDivider');
   if(adminDivider) adminDivider.style.display = isAdmin ? 'block' : 'none';
   // "💾 Salvar" só faz algo quando isAdmin ou accessoEquipeId (ver o clique, mais abaixo
@@ -6138,7 +6222,7 @@ function renderInscritosContentHtml(){
     <h2>✍️ Cadastro manual</h2>
     <p class="hint">Cadastre um inscrito por vez: informe o gênero e marque em quais modalidades está inscrito. O gênero é usado para casar automaticamente o inscrito com os jogos e súmulas femininos ou masculinos de cada modalidade. Cada inscrito recebe um código único (4 letras minúsculas + 4 números, em qualquer combinação) ao ser cadastrado.</p>
     <div class="row" style="align-items:flex-start;">
-      <div class="field"><label class="f-label">Nome do inscrito</label><input type="text" id="alNome" placeholder="Nome completo" style="width:220px;" ${adminDisabled()}></div>
+      <div class="field"><label class="f-label">Nome do inscrito</label><input type="text" id="alNome" placeholder="Nome completo" style="width:220px;" ${adminDisabled()}><p class="hint" style="margin:2px 0 0;">Digite o nome completo — ele é abreviado automaticamente ao salvar (ex.: "Alice Pena Prado Xavier" → "A. Pena P. Xavier").</p></div>
       <div class="field"><label class="f-label">equipe</label><select id="alequipe" ${adminDisabled()}>${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
       <div class="field"><label class="f-label">Gênero</label><select id="alGenero" ${adminDisabled()}><option value="F">Feminino</option><option value="M">Masculino</option></select></div>
       <div class="field">
@@ -6281,17 +6365,18 @@ function bindInscritosEvents(){
       // processo de autorização real da escola (termo em papel, formulário próprio
       // etc.) -- só documenta que a pessoa confirmou tê-lo no momento do cadastro.
       if(!consentimento){ showAlert('Confirme a declaração de autorização (LGPD) antes de cadastrar.'); return; }
+      const nomeAbreviado = abreviarNome(nome); // por segurança -- ver abreviarNome()
 
       const criarInscrito = ()=>{
         const novoInscritoId = nextInscritoId();
         STATE.inscritos.push({
-          id:novoInscritoId, nome, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
+          id:novoInscritoId, nome:nomeAbreviado, teamId, genero, modalidades:mods, codigo:uniqueStudentCode(),
           restricaoAlimentar: temRestricao, restricoesAlimentares,
           alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
           foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
           consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
         });
-        registrarOperacao('inscrito_criado', `Inscrito cadastrado (admin): ${nome}`);
+        registrarOperacao('inscrito_criado', `Inscrito cadastrado (admin): ${nomeAbreviado}`);
         alNovoFotoDataUrl = null;
         updateAlNovaFotoPreview();
         document.getElementById('alNome').value='';
@@ -6305,10 +6390,11 @@ function bindInscritosEvents(){
       // Diferente da importação por planilha (que já não duplica quem tem mesmo
       // nome+equipe) e de "Adicionar aglutinador" (que já recusa nome repetido), o
       // cadastro manual não tinha nenhuma checagem — um duplo-clique ou reenvio por
-      // engano criava um segundo inscrito idêntico em silêncio.
-      const jaExiste = STATE.inscritos.some(a=> a.teamId===teamId && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+      // engano criava um segundo inscrito idêntico em silêncio. Compara pelo nome JÁ
+      // abreviado (mesmo formato que fica salvo) -- ver abreviarNome().
+      const jaExiste = STATE.inscritos.some(a=> a.teamId===teamId && normalizeSearchText(a.nome)===normalizeSearchText(nomeAbreviado));
       if(jaExiste){
-        showConfirm(`Já existe um inscrito chamado "${nome}" em ${teamLabel(teamId)}. Cadastrar mesmo assim? (pode ser realmente um segundo aluno com o mesmo nome, ou uma duplicidade por engano)`, criarInscrito);
+        showConfirm(`Já existe um inscrito chamado "${nomeAbreviado}" em ${teamLabel(teamId)}. Cadastrar mesmo assim? (pode ser realmente um segundo aluno com o mesmo nome, ou uma duplicidade por engano)`, criarInscrito);
       } else {
         criarInscrito();
       }
@@ -6490,7 +6576,7 @@ function saveEditInscritoModal(){
 
   // Código e foto (e portanto o QR Code, gerado a partir do código) permanecem exatamente
   // como estavam desde a inscrição — só os demais campos são atualizados aqui.
-  a.nome = nome;
+  a.nome = abreviarNome(nome); // por segurança -- ver abreviarNome()
   a.teamId = teamId;
   a.genero = genero;
   a.modalidades = mods;
@@ -7616,9 +7702,13 @@ function commitImportPlan(plano){
 
   plano.forEach(p=>{
     const teamId = p.teamId!=null ? p.teamId : equipeIdPorNomeNovo.get(norm(p.teamLabel));
-    let inscrito = STATE.inscritos.find(a=> a.teamId===teamId && norm(a.nome)===norm(p.nome));
+    const nomeAbreviado = abreviarNome(p.nome); // por segurança -- ver abreviarNome()
+    // Compara pelo nome JÁ abreviado (mesmo formato que fica salvo) -- senão, reimportar
+    // a mesma planilha corrigida nunca reconheceria quem já foi importado antes (o nome
+    // completo digitado na planilha nunca bate com o nome abreviado já salvo).
+    let inscrito = STATE.inscritos.find(a=> a.teamId===teamId && norm(a.nome)===norm(nomeAbreviado));
     if(!inscrito){
-      inscrito = {id: nextInscritoId(), nome:p.nome, teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
+      inscrito = {id: nextInscritoId(), nome:nomeAbreviado, teamId, genero:p.genero, modalidades:[], codigo: uniqueStudentCode(),
         restricaoAlimentar:false, restricoesAlimentares:'', alergiaMedicamento:false, alergias:'', foto:'',
         consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()};
       STATE.inscritos.push(inscrito);
@@ -9672,7 +9762,7 @@ function renderAcessoEquipeView(){
   <div class="card">
     <h2>${editando ? `Editar Inscrito — ${escPdf(editando.nome)}` : `Cadastrar Inscrito — ${escPdf(team.label)}`}</h2>
     <div class="row">
-      <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;" value="${editando?escPdf(editando.nome):''}"></div>
+      <div class="field" style="flex:1; min-width:220px;"><label class="f-label">Nome completo</label><input type="text" id="aeNome" style="width:100%;" value="${editando?escPdf(editando.nome):''}">${!editando?'<p class="hint" style="margin:2px 0 0;">Digite o nome completo — ele é abreviado automaticamente ao salvar (ex.: "Alice Pena Prado Xavier" → "A. Pena P. Xavier").</p>':''}</div>
       <div class="field"><label class="f-label">Gênero</label><select id="aeGenero"><option value="F" ${editando&&editando.genero==='F'?'selected':''}>Feminino</option><option value="M" ${editando&&editando.genero==='M'?'selected':''}>Masculino</option></select></div>
       <div class="field">
         <label class="f-label">Foto</label>
@@ -9797,6 +9887,7 @@ function renderAcessoEquipeView(){
     // já tem essa declaração registrada desde a criação) -- ver mesmo comentário no
     // cadastro manual do admin.
     if(!aeEditandoId && !document.getElementById('aeConsentimento').checked){ showAlert('Confirme a declaração de autorização (LGPD) antes de cadastrar.'); return; }
+    const nomeAbreviado = abreviarNome(nome); // por segurança -- ver abreviarNome(). Usado daqui em diante (inclusive nas checagens de duplicidade abaixo, que comparam contra o nome já abreviado salvo nos outros inscritos)
 
     if(aeEditandoId){
       // Busca de novo, fresco, pelo ID — NÃO usa a `editando` capturada lá em cima na
@@ -9817,16 +9908,16 @@ function renderAcessoEquipeView(){
         // dela — confirmado com teste).
         const alvoAtual = STATE.inscritos.find(a=>a.id===idAlvo);
         if(!alvoAtual){ showAlert('Esse inscrito não existe mais nesta Equipe (pode ter sido removido). A edição foi cancelada.'); aeEditandoId=null; renderAcessoEquipeView(); return; }
-        alvoAtual.nome = nome; alvoAtual.genero = genero; alvoAtual.modalidades = mods;
+        alvoAtual.nome = nomeAbreviado; alvoAtual.genero = genero; alvoAtual.modalidades = mods;
         alvoAtual.restricaoAlimentar = temRestricao; alvoAtual.restricoesAlimentares = restricoesAlimentares;
         alvoAtual.alergiaMedicamento = temAlergia; alvoAtual.alergias = alergiasMedicamento;
         aeEditandoId = null;
         markDirty();
         renderAcessoEquipeView();
       };
-      const duplicado = STATE.inscritos.some(a=> a.id!==alvo.id && a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+      const duplicado = STATE.inscritos.some(a=> a.id!==alvo.id && a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nomeAbreviado));
       if(duplicado){
-        showConfirm(`Já existe outro inscrito chamado "${nome}" em ${team.label}. Salvar mesmo assim?`, salvarEdicao);
+        showConfirm(`Já existe outro inscrito chamado "${nomeAbreviado}" em ${team.label}. Salvar mesmo assim?`, salvarEdicao);
       } else {
         salvarEdicao();
       }
@@ -9836,21 +9927,21 @@ function renderAcessoEquipeView(){
     const criarInscrito = ()=>{
       const novoInscritoId = nextInscritoId();
       STATE.inscritos.push({
-        id:novoInscritoId, nome, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
+        id:novoInscritoId, nome:nomeAbreviado, teamId:team.id, genero, modalidades:mods, codigo:uniqueStudentCode(),
         restricaoAlimentar: temRestricao, restricoesAlimentares,
         alergiaMedicamento: temAlergia, alergias: alergiasMedicamento,
         foto: imgSet('foto_'+novoInscritoId, alNovoFotoDataUrl),
         consentimentoResponsavel: true, consentimentoRegistradoEm: new Date().toISOString()
       });
-      registrarOperacao('inscrito_criado', `Inscrito cadastrado (representante de ${team.label}): ${nome}`);
+      registrarOperacao('inscrito_criado', `Inscrito cadastrado (representante de ${team.label}): ${nomeAbreviado}`);
       alNovoFotoDataUrl = null;
       markDirty();
       renderAcessoEquipeView();
     };
 
-    const jaExiste = STATE.inscritos.some(a=> a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nome));
+    const jaExiste = STATE.inscritos.some(a=> a.teamId===team.id && normalizeSearchText(a.nome)===normalizeSearchText(nomeAbreviado));
     if(jaExiste){
-      showConfirm(`Já existe um inscrito chamado "${nome}" em ${team.label}. Cadastrar mesmo assim?`, criarInscrito);
+      showConfirm(`Já existe um inscrito chamado "${nomeAbreviado}" em ${team.label}. Cadastrar mesmo assim?`, criarInscrito);
     } else {
       criarInscrito();
     }
@@ -10080,6 +10171,7 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('closeSolicitacoesPrivacidadeModal').addEventListener('click', fecharSolicitacoesPrivacidadeModal);
   document.getElementById('btnApagarSolicitacoesAtendidas').addEventListener('click', apagarSolicitacoesAtendidas);
   document.getElementById('btnEliminarDadosSensiveis').addEventListener('click', iniciarEliminarDadosSensiveis);
+  document.getElementById('btnAbreviarNomes').addEventListener('click', iniciarAbreviarNomes);
   document.getElementById('btnEditarAvisoPrivacidade').addEventListener('click', abrirEditarAvisoPrivacidadeModal);
   document.getElementById('closeEditarAvisoPrivacidadeModal').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
   document.getElementById('cancelarEditarAvisoPrivacidadeBtn').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
