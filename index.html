@@ -923,50 +923,73 @@ function defaultHeader(){
 function defaultSumulaTipos(){
   return {
     Futsal: [
-      {key:'gol', label:'Gol', contaPlacar:true, valor:1, removivel:false},
-      {key:'cartao_amarelo', label:'Cartão Amarelo', contaPlacar:false, removivel:false},
-      {key:'cartao_vermelho', label:'Cartão Vermelho', contaPlacar:false, removivel:false},
-      {key:'falta_acumulada', label:'Falta Acumulada', contaPlacar:false, removivel:false},
-      {key:'pedido_tempo', label:'Pedido de Tempo', contaPlacar:false, removivel:false},
+      {key:'gol', label:'Gol', contaPlacar:true, valor:1},
+      {key:'cartao_amarelo', label:'Cartão Amarelo', contaPlacar:false},
+      {key:'cartao_vermelho', label:'Cartão Vermelho', contaPlacar:false},
+      {key:'falta_acumulada', label:'Falta Acumulada', contaPlacar:false},
+      {key:'pedido_tempo', label:'Pedido de Tempo', contaPlacar:false},
     ],
     Handebol: [
-      {key:'gol', label:'Gol', contaPlacar:true, valor:1, removivel:false},
-      {key:'advertencia', label:'Advertência', contaPlacar:false, removivel:false},
-      {key:'exclusao_2min', label:'Exclusão (2 min)', contaPlacar:false, removivel:false},
-      {key:'desqualificacao', label:'Desqualificação', contaPlacar:false, removivel:false},
-      {key:'expulsao', label:'Expulsão', contaPlacar:false, removivel:false},
+      {key:'gol', label:'Gol', contaPlacar:true, valor:1},
+      {key:'advertencia', label:'Advertência', contaPlacar:false},
+      {key:'exclusao_2min', label:'Exclusão (2 min)', contaPlacar:false},
+      {key:'desqualificacao', label:'Desqualificação', contaPlacar:false},
+      {key:'expulsao', label:'Expulsão', contaPlacar:false},
     ],
     Voleibol: [
-      {key:'ponto', label:'Ponto', contaPlacar:true, valor:1, removivel:false},
-      {key:'ace', label:'Ace', contaPlacar:false, removivel:false},
-      {key:'erro', label:'Erro', contaPlacar:false, removivel:false},
-      {key:'bloqueio', label:'Bloqueio', contaPlacar:false, removivel:false},
-      {key:'pedido_tempo_tecnico', label:'Pedido de Tempo Técnico', contaPlacar:false, removivel:false},
-      {key:'advertencia', label:'Advertência', contaPlacar:false, removivel:false},
-      {key:'penalizacao', label:'Penalização', contaPlacar:false, removivel:false},
-      {key:'expulsao', label:'Expulsão', contaPlacar:false, removivel:false},
+      {key:'ponto', label:'Ponto', contaPlacar:true, valor:1},
+      {key:'ace', label:'Ace', contaPlacar:false},
+      {key:'erro', label:'Erro', contaPlacar:false},
+      {key:'bloqueio', label:'Bloqueio', contaPlacar:false},
+      {key:'pedido_tempo_tecnico', label:'Pedido de Tempo Técnico', contaPlacar:false},
+      {key:'advertencia', label:'Advertência', contaPlacar:false},
+      {key:'penalizacao', label:'Penalização', contaPlacar:false},
+      {key:'expulsao', label:'Expulsão', contaPlacar:false},
     ],
     Basquete: [
-      {key:'ponto_2', label:'Cesta de 2', contaPlacar:true, valor:2, removivel:false},
-      {key:'ponto_3', label:'Cesta de 3', contaPlacar:true, valor:3, removivel:false},
-      {key:'lance_livre', label:'Lance Livre', contaPlacar:true, valor:1, removivel:false},
-      {key:'falta_pessoal', label:'Falta Pessoal', contaPlacar:false, removivel:false},
-      {key:'falta_tecnica', label:'Falta Técnica', contaPlacar:false, removivel:false},
-      {key:'tempo_debitado', label:'Tempo Debitado', contaPlacar:false, removivel:false},
+      {key:'ponto_2', label:'Cesta de 2', contaPlacar:true, valor:2},
+      {key:'ponto_3', label:'Cesta de 3', contaPlacar:true, valor:3},
+      {key:'lance_livre', label:'Lance Livre', contaPlacar:true, valor:1},
+      {key:'falta_pessoal', label:'Falta Pessoal', contaPlacar:false},
+      {key:'falta_tecnica', label:'Falta Técnica', contaPlacar:false},
+      {key:'tempo_debitado', label:'Tempo Debitado', contaPlacar:false},
     ],
     Peteca: [
-      {key:'ponto', label:'Ponto', contaPlacar:true, valor:1, removivel:false},
-      {key:'set_vencido', label:'Set Vencido', contaPlacar:false, removivel:false},
-      {key:'pedido_tempo', label:'Pedido de Tempo', contaPlacar:false, removivel:false},
+      {key:'ponto', label:'Ponto', contaPlacar:true, valor:1},
+      {key:'set_vencido', label:'Set Vencido', contaPlacar:false},
+      {key:'pedido_tempo', label:'Pedido de Tempo', contaPlacar:false},
     ],
     _default: [
-      {key:'gol', label:'Gol/Ponto', contaPlacar:true, valor:1, removivel:false},
-      {key:'cartao_amarelo', label:'Cartão Amarelo', contaPlacar:false, removivel:false},
-      {key:'cartao_vermelho', label:'Cartão Vermelho', contaPlacar:false, removivel:false},
-      {key:'falta', label:'Falta', contaPlacar:false, removivel:false},
-      {key:'dois_minutos', label:'2 Minutos', contaPlacar:false, removivel:false},
+      {key:'gol', label:'Gol/Ponto', contaPlacar:true, valor:1},
+      {key:'cartao_amarelo', label:'Cartão Amarelo', contaPlacar:false},
+      {key:'cartao_vermelho', label:'Cartão Vermelho', contaPlacar:false},
+      {key:'falta', label:'Falta', contaPlacar:false},
+      {key:'dois_minutos', label:'2 Minutos', contaPlacar:false},
     ],
   };
+}
+/* Registro PERMANENTE do que cada variável de súmula significa (rótulo, se conta ponto,
+   quanto vale) -- diferente de STATE.sumulaTipos (a lista ATIVA de botões oferecidos em
+   cada modalidade, que agora qualquer variável pode ser removida dela, inclusive as
+   padrão do sistema como "Gol"). Uma entrada aqui NUNCA é apagada, mesmo depois de
+   remover a variável correspondente de toda modalidade -- ver tipoInfo(), que consulta
+   este registro antes de desistir e tratar a variável como desconhecida. Sem isso,
+   remover "Gol" de uma modalidade faria o placar de jogos que JÁ TÊM gols lançados ser
+   recalculado como se aqueles gols não contassem mais ponto nenhum (bug real, confirmado
+   com teste antes desta correção existir) -- os lançamentos continuam existindo no
+   histórico, mas tipoInfo() não teria mais como saber que "gol" significa "conta ponto,
+   vale 1", e voltaria pro genérico contaPlacar:false. */
+function defaultSumulaTiposHistorico(){
+  const hist = {};
+  Object.values(defaultSumulaTipos()).forEach(lista=>{
+    // Não sobrescreve se a chave já apareceu antes -- "gol" existe em várias modalidades
+    // com rótulos ligeiramente diferentes ("Gol" no Futsal, "Gol/Ponto" no genérico
+    // "_default"), mas contaPlacar/valor são sempre os mesmos; preservar o PRIMEIRO
+    // rótulo encontrado evita que a ordem de iteração do objeto decida arbitrariamente
+    // qual rótulo "vence" no registro permanente.
+    lista.forEach(t=>{ if(!hist[t.key]) hist[t.key] = {label:t.label, contaPlacar:t.contaPlacar, valor:t.valor}; });
+  });
+  return hist;
 }
 
 /* Regras de pontuação configuráveis — usadas tanto no cálculo da classificação quanto no texto
@@ -1024,7 +1047,7 @@ async function defaultState(){
     desfileJurados: [], desfileVotos: {}, // avaliação do desfile por múltiplos jurados — STATE.desfile[teamId] passa a ser a MÉDIA calculada dos votos, não mais editado direto
     modalidadesIndividuais: defaultModalidadesIndividuais(),
     modalidadesArtisticas: [],
-    sumulas: {}, sumulaTipos: defaultSumulaTipos(),
+    sumulas: {}, sumulaTipos: defaultSumulaTipos(), sumulaTiposHistorico: defaultSumulaTiposHistorico(),
     cardapio: [], checkins: [],
     regras: defaultRegras(),
     criteriosPersonalizados: [],
@@ -1532,7 +1555,17 @@ async function ensureDefaults(s){
       if(!Array.isArray(s.sumulaTipos[mod]) || s.sumulaTipos[mod].length===0) s.sumulaTipos[mod] = sumulaTiposPadrao[mod];
     });
   }
-  Object.values(s.sumulaTipos).forEach(lista=> lista.forEach(t=>{ if(typeof t.valor!=='number') t.valor = 1; }));
+  Object.values(s.sumulaTipos).forEach(lista=> lista.forEach(t=>{ if(typeof t.valor!=='number') t.valor = 1; delete t.removivel; }));
+  // Registro permanente (ver defaultSumulaTiposHistorico()) -- migração: quem já tinha
+  // variáveis customizadas criadas antes desta correção existir também entra aqui, não
+  // só as variáveis padrão do sistema, senão o placar de jogos com lançamentos de uma
+  // variável customizada antiga ficaria com o mesmo problema que motivou essa correção.
+  if(!s.sumulaTiposHistorico || typeof s.sumulaTiposHistorico!=='object') s.sumulaTiposHistorico = {};
+  const historicoBase = defaultSumulaTiposHistorico();
+  Object.values(s.sumulaTipos).forEach(lista=> lista.forEach(t=>{
+    if(!s.sumulaTiposHistorico[t.key]) s.sumulaTiposHistorico[t.key] = {label:t.label, contaPlacar:t.contaPlacar, valor:t.valor};
+  }));
+  Object.keys(historicoBase).forEach(key=>{ if(!s.sumulaTiposHistorico[key]) s.sumulaTiposHistorico[key] = historicoBase[key]; });
   if(!s.regras) s.regras = defaultRegras();
   else {
     const d = defaultRegras();
@@ -2243,7 +2276,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','codigoAcessoCifraSalt'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','sumulaTiposHistorico','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','codigoAcessoCifraSalt'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -2323,6 +2356,7 @@ function syncConstruirLinha(tabela, registroId){
       crachaLogo1Ref: STATE.crachaLogos.logo1 || null,
       crachaLogo2Ref: STATE.crachaLogos.logo2 || null,
       sumulaTipos: STATE.sumulaTipos,
+      sumulaTiposHistorico: STATE.sumulaTiposHistorico,
       regras: STATE.regras,
       tabOrder: STATE.tabOrder,
       crachaConfig: STATE.crachaConfig,
@@ -2446,6 +2480,7 @@ function syncAplicarLinha(linha){
     else if(registro_id==='crachaLogo1Ref'){ STATE.crachaLogos.logo1 = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
     else if(registro_id==='crachaLogo2Ref'){ STATE.crachaLogos.logo2 = dados; syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(dados)); }
     else if(registro_id==='sumulaTipos') STATE.sumulaTipos = dados;
+    else if(registro_id==='sumulaTiposHistorico') STATE.sumulaTiposHistorico = dados;
     else if(registro_id==='regras') STATE.regras = dados;
     else if(registro_id==='tabOrder') STATE.tabOrder = dados;
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
@@ -3934,13 +3969,13 @@ function renderJogos(){
       </div>
       <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--border);">
         <p class="f-label" style="margin-bottom:8px;">Variáveis cadastradas por modalidade</p>
-        <p class="hint" style="margin-top:0;">As padrão do sistema (Gol, Cartão, etc.) não podem ser removidas. As que você criar têm um botão "✕ Remover" — lançamentos já registrados com uma variável removida continuam no histórico normalmente, só some o botão de lançar novas ocorrências desse tipo.</p>
+        <p class="hint" style="margin-top:0;">Toda variável tem um botão "✕ Remover" — inclusive as padrão do sistema (Gol, Cartão etc.), caso não façam sentido pra uma modalidade específica. Lançamentos já registrados com uma variável removida continuam no histórico normalmente, com o placar calculado corretamente do mesmo jeito — só some o botão de lançar novas ocorrências desse tipo. Se remover por engano, basta cadastrar de novo com o mesmo nome, em "Adicionar nova variável de súmula" acima.</p>
         ${STATE.modalidades.length===0 ? '<p class="hint">Cadastre ao menos uma modalidade em "Inscrições" → "Modalidades".</p>' : STATE.modalidades.map(mod=>{
           const tipos = sumulaTiposDaModalidade(mod);
           return `<div style="margin-bottom:10px;">
             <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
             <div class="pill-group">
-              ${tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:8px; ${t.removivel?'':'opacity:0.75;'}">${escPdf(t.label)}${t.removivel ? `<button class="btn danger small removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" aria-label="Remover a variável ${escPdf(t.label)} de ${escPdf(mod)}">✕ Remover</button>` : ''}</span>`).join('')}
+              ${tipos.length===0 ? '<span class="hint">Nenhuma variável nesta modalidade -- cadastre pelo menos uma acima, ou o placar só poderá ser preenchido manualmente.</span>' : tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:8px;">${escPdf(t.label)}<button class="btn danger small removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" aria-label="Remover a variável ${escPdf(t.label)} de ${escPdf(mod)}">✕ Remover</button></span>`).join('')}
             </div>
           </div>`;
         }).join('')}
@@ -4029,7 +4064,8 @@ function bindAdicionarVariavelSumula(){
         STATE.sumulaTipos[mod] = STATE.sumulaTipos._default.slice();
       }
       if(STATE.sumulaTipos[mod].some(t=>t.key===key)){ jaExistentes.push(mod); return; }
-      STATE.sumulaTipos[mod].push({key, label:nome, contaPlacar, valor, removivel:true});
+      STATE.sumulaTipos[mod].push({key, label:nome, contaPlacar, valor});
+      STATE.sumulaTiposHistorico[key] = {label:nome, contaPlacar, valor}; // ver defaultSumulaTiposHistorico()
       adicionadas.push(mod);
     });
     markDirty();
@@ -8287,7 +8323,15 @@ function sumulaTiposDaModalidade(modalidade){
 }
 function tipoInfo(key, modalidade){
   const lista = modalidade ? sumulaTiposDaModalidade(modalidade) : Object.values(STATE.sumulaTipos).flat();
-  return lista.find(t=>t.key===key) || {key, label:key, contaPlacar:false, valor:1};
+  const naListaAtiva = lista.find(t=>t.key===key);
+  if(naListaAtiva) return naListaAtiva;
+  // Não está mais na lista ATIVA da modalidade (foi removida) -- consulta o registro
+  // permanente antes de desistir, pra um lançamento antigo de uma variável já removida
+  // continuar sabendo corretamente se contava ponto e quanto valia (ver
+  // defaultSumulaTiposHistorico() pra entender por que isso existe).
+  const doHistorico = STATE.sumulaTiposHistorico && STATE.sumulaTiposHistorico[key];
+  if(doHistorico) return {key, ...doHistorico};
+  return {key, label:key, contaPlacar:false, valor:1};
 }
 function inscritosDaSumula(game, side){
   const teamId = side==='A' ? game.teamA : game.teamB;
