@@ -3975,7 +3975,7 @@ function renderJogos(){
           return `<div style="margin-bottom:10px;">
             <p style="font-weight:600; font-size:12.5px; margin:0 0 4px;">${escPdf(mod)}</p>
             <div class="pill-group">
-              ${tipos.length===0 ? '<span class="hint">Nenhuma variável nesta modalidade -- cadastre pelo menos uma acima, ou o placar só poderá ser preenchido manualmente.</span>' : tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:8px;">${escPdf(t.label)}<button class="btn danger small removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" aria-label="Remover a variável ${escPdf(t.label)} de ${escPdf(mod)}">✕ Remover</button></span>`).join('')}
+              ${tipos.length===0 ? '<span class="hint">Nenhuma variável nesta modalidade -- cadastre pelo menos uma acima, ou o placar só poderá ser preenchido manualmente.</span>' : tipos.map(t=>`<span class="pill" style="display:inline-flex; align-items:center; gap:8px;">${escPdf(t.label)}<button class="btn danger small removeSumulaTipo" data-mod="${escPdf(mod)}" data-key="${escPdf(t.key)}" title="Remover" aria-label="Remover a variável ${escPdf(t.label)} de ${escPdf(mod)}">✕</button></span>`).join('')}
             </div>
           </div>`;
         }).join('')}
