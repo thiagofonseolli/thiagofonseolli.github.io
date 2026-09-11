@@ -3700,19 +3700,28 @@ function renderTabs(){
   el.querySelectorAll('.tab-btn').forEach(btn=> btn.addEventListener('click', ()=>{ activeTab = btn.dataset.tab; renderAll(); }));
 }
 
+/* Única fonte da verdade pra "quais abas um visitante sem login pode ver" -- usada tanto
+   por orderedTabs() (o que aparece na barra) quanto pelo reforço de segurança dentro de
+   renderAll() (o que realmente é permitido abrir, mesmo se activeTab tiver ficado com
+   outro valor -- ex.: sessão de admin expirou enquanto a pessoa estava numa aba
+   restrita). Extraída como constante justamente pra essas duas checagens nunca
+   divergirem de novo -- foi exatamente essa divergência (a barra mostrando "Jogos" mas o
+   reforço ainda barrando) que causou o botão aparecer sem abrir nada. */
+const TABS_PUBLICAS_IDS = ['painel', 'jogos', 'edital'];
 /* Retorna as abas (TABS) reordenadas de acordo com a preferência do administrador,
    salva em STATE.tabOrder. Abas novas que ainda não constam em tabOrder (por exemplo,
    após uma atualização do app) aparecem no final, na ordem padrão.
-   Quem não está logado como administrador vê "Painel", "Jogos" (só consulta — o resumo
-   de cada partida aparece normalmente, mas não dá pra expandir pra ver a súmula/
-   escalação/ferramentas administrativas, ver gameRowHtml()) e "Edital (Regulamento)" —
-   as demais controlam dados operacionais do evento (súmulas de verdade, inscrições,
-   gerador de tabela etc.) que não são pra edição nem consulta pública. */
+   Quem não está logado como administrador vê só as abas em TABS_PUBLICAS_IDS -- hoje
+   "Painel", "Jogos" (só consulta — o resumo de cada partida aparece normalmente, mas não
+   dá pra expandir pra ver a súmula/escalação/ferramentas administrativas, ver
+   gameRowHtml()) e "Edital (Regulamento)" — as demais controlam dados operacionais do
+   evento (súmulas de verdade, inscrições, gerador de tabela etc.) que não são pra edição
+   nem consulta pública. */
 function orderedTabs(){
   const byId = {}; TABS.forEach(t=> byId[t.id]=t);
   const ordered = (STATE.tabOrder||[]).map(id=> byId[id]).filter(Boolean);
   TABS.forEach(t=>{ if(!ordered.includes(t)) ordered.push(t); });
-  if(!isAdmin) return ordered.filter(t=> t.id==='painel' || t.id==='jogos' || t.id==='edital');
+  if(!isAdmin) return ordered.filter(t=> TABS_PUBLICAS_IDS.includes(t.id));
   return ordered;
 }
 
@@ -9717,7 +9726,7 @@ function renderAll(){
   // visitante com um único item dentro).
   const moreOptionsEl = document.getElementById('moreOptionsWrap');
   if(moreOptionsEl) moreOptionsEl.style.display = isAdmin ? '' : 'none';
-  if(!isAdmin && activeTab!=='painel' && activeTab!=='edital') activeTab = 'painel'; // reforça o filtro de orderedTabs() mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
+  if(!isAdmin && !TABS_PUBLICAS_IDS.includes(activeTab)) activeTab = 'painel'; // reforça o filtro de orderedTabs() (TABS_PUBLICAS_IDS) mesmo se activeTab tiver ficado com outro valor (ex.: sessão de admin expirou)
   renderTabs();
   renderScoreboard();
   updateAdminButton();
