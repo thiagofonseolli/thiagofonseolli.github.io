@@ -111,7 +111,12 @@
   .escalacao-grid{display:flex; flex-wrap:wrap; gap:14px; padding-top:4px;}
   .jogador-circulo{position:relative; width:104px; height:104px; border:none; padding:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent;}
   .jogador-circulo:disabled{cursor:default; opacity:0.6;}
-  .jogador-circulo-svg{width:100%; height:100%; display:block;}
+  /* pointer-events:none em TUDO que é visual dentro do botão (SVG inteiro, número,
+     selos) -- faz o clique cair sempre no <button> em si, não importa em cima de qual
+     pixel exato a pessoa tocar (o número, o nome curvado, a borda do círculo...).
+     Sem isso, dependendo do navegador, um clique bem em cima do número ficava "preso"
+     no SVG por baixo dele em vez de borbulhar pro botão -- bug real relatado. */
+  .jogador-circulo-svg{width:100%; height:100%; display:block; pointer-events:none;}
   .jogador-circulo-borda{fill:#fff; stroke:var(--navy); stroke-width:2.5;}
   .jogador-circulo:not(:disabled):hover .jogador-circulo-borda, .jogador-circulo:not(:disabled):focus-visible .jogador-circulo-borda{stroke:var(--gold); fill:#FFFBEA;}
   .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; font-size:8.5px; fill:var(--text); letter-spacing:0.01em;}
