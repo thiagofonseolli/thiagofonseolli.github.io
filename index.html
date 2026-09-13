@@ -4082,7 +4082,16 @@ function bindAdicionarVariavelSumula(){
   document.querySelectorAll('.removeSumulaTipo').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const mod = btn.dataset.mod, key = btn.dataset.key;
-      const tipo = (STATE.sumulaTipos[mod]||[]).find(t=>t.key===key);
+      // Busca em sumulaTiposDaModalidade(mod) -- a MESMA função usada pra exibir a lista
+      // (que cai em STATE.sumulaTipos._default quando a modalidade ainda não tem um
+      // conjunto próprio, ex.: Queimada/Porta Bandeira/Dodge ball) -- não em
+      // STATE.sumulaTipos[mod] diretamente, que fica undefined exatamente nesses casos.
+      // Bug real, confirmado com teste: buscar direto em STATE.sumulaTipos[mod] (com
+      // fallback pra [], não pro _default de verdade) fazia o botão "✕" não encontrar
+      // NADA pra remover nas modalidades sem conjunto próprio -- retornava em silêncio,
+      // sem confirmação, sem erro, sem efeito nenhum, só pras duas primeiras modalidades
+      // (as que já vêm com conjunto próprio: Futsal, Handebol) funcionarem.
+      const tipo = sumulaTiposDaModalidade(mod).find(t=>t.key===key);
       if(!tipo) return;
       // conta quantos lançamentos já existentes usam essa variável, pra avisar antes de remover
       let contagem = 0;
@@ -4091,6 +4100,11 @@ function bindAdicionarVariavelSumula(){
         ? `Remover a variável "${tipo.label}" de ${mod}? Já existem ${contagem} lançamento(s) registrado(s) com ela — eles continuam no histórico normalmente, só o botão de lançar novas ocorrências desse tipo vai desaparecer.`
         : `Remover a variável "${tipo.label}" de ${mod}?`;
       showConfirm(aviso, ()=>{
+        // Materializa um conjunto PRÓPRIO pra esta modalidade antes de filtrar -- se ela
+        // ainda estava só herdando o "_default" por referência (nunca tinha sido
+        // "tocada" antes), filtrar aquele array compartilhado afetaria TODAS as outras
+        // modalidades que também ainda dependem dele, não só esta.
+        if(!Array.isArray(STATE.sumulaTipos[mod])) STATE.sumulaTipos[mod] = STATE.sumulaTipos._default.slice();
         STATE.sumulaTipos[mod] = STATE.sumulaTipos[mod].filter(t=>t.key!==key);
         markDirty();
         renderJogos();
