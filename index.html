@@ -119,7 +119,7 @@
   .jogador-circulo-svg{width:100%; height:100%; display:block; pointer-events:none;}
   .jogador-circulo-borda{fill:#fff; stroke:var(--navy); stroke-width:2.5;}
   .jogador-circulo:not(:disabled):hover .jogador-circulo-borda, .jogador-circulo:not(:disabled):focus-visible .jogador-circulo-borda{stroke:var(--gold); fill:#FFFBEA;}
-  .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; font-size:8.5px; fill:var(--text); letter-spacing:0.01em;}
+  .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; fill:var(--text); letter-spacing:0.01em;} /* font-size vem inline por jogador, ver rosterHtml() */
   .jogador-circulo-numero{position:absolute; top:50%; left:50%; transform:translate(-50%,-58%); font-family:'Oswald',sans-serif; font-weight:700; font-size:30px; color:var(--navy); line-height:1; pointer-events:none;}
   .jogador-circulo-badge{position:absolute; top:-2px; right:-2px; background:var(--green); color:#fff; border-radius:50%; min-width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'Space Mono',monospace; box-shadow:0 0 0 2px #fff; pointer-events:none;}
   .jogador-circulo-saude{position:absolute; top:2px; left:2px; font-size:13px; display:flex; gap:1px; pointer-events:none;}
@@ -8780,11 +8780,25 @@ function buildGameDetailHtml(gameId){
       // nome, mas nomes bem longos podem ficar apertados; ver comentário de
       // acompanhamento sobre isso, é normal precisar de um ajuste fino depois de ver
       // renderizado de verdade num navegador.
+      // Geometria do arco: raio 44 (a caber com folga dentro da borda do círculo, raio
+      // 56), cordas exatamente na altura do centro (y=60) -- dá um semicírculo de
+      // verdade (180°) na parte de baixo, com comprimento conhecido (π×raio), o que
+      // permite calcular o tamanho de fonte que cabe. Tamanho de fonte MAIOR pra nomes
+      // curtos, menor pra nomes longos -- sempre o máximo que cabe sem estourar o arco
+      // (pedido explícito: "ampliar ao máximo possível para que fique legível e dentro
+      // do círculo"). ~0.56 é uma estimativa de largura média de caractere numa fonte
+      // sans-serif nesse peso -- não é exato (fonte de verdade só se sabe rendendo num
+      // navegador de verdade), por isso o textLength abaixo funciona como uma garantia
+      // a mais: força o texto a nunca ultrapassar o arco, comprimindo um pouco os
+      // espaçamentos se precisar, mesmo que a estimativa de tamanho erre pra mais.
+      const raioTexto = 44;
+      const comprimentoArco = Math.PI * raioTexto;
+      const tamanhoFonte = Math.max(6.5, Math.min(15, comprimentoArco / (Math.max(a.nome.length,1) * 0.56)));
       return `<button class="jogador-circulo" data-inscrito="${a.id}" data-side="${side}" ${desabilitado?'disabled':''} aria-label="Lançar ocorrência para ${escPdf(a.nome)}${a.numeroUniforme!=null?', número '+a.numeroUniforme:''}${totalLancamentos>0?`, ${totalLancamentos} lançamento(s) já registrado(s)`:''}">
         <svg viewBox="0 0 120 120" class="jogador-circulo-svg" aria-hidden="true">
           <circle cx="60" cy="60" r="56" class="jogador-circulo-borda"/>
-          <path id="${pathId}" d="M 16,64 A 46,46 0 0 0 104,64" fill="none"/>
-          <text class="jogador-circulo-nome"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escPdf(a.nome)}</textPath></text>
+          <path id="${pathId}" d="M 16,60 A 44,44 0 0 0 104,60" fill="none"/>
+          <text class="jogador-circulo-nome" style="font-size:${tamanhoFonte.toFixed(1)}px;"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle" textLength="${(comprimentoArco*0.94).toFixed(0)}" lengthAdjust="spacingAndGlyphs">${escPdf(a.nome)}</textPath></text>
         </svg>
         <span class="jogador-circulo-numero">${a.numeroUniforme!=null?a.numeroUniforme:'?'}</span>
         ${totalLancamentos>0?`<span class="jogador-circulo-badge">${totalLancamentos}</span>`:''}
