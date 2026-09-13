@@ -108,6 +108,16 @@
 
   .game-card{border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-bottom:8px;}
   .game-top{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .escalacao-grid{display:flex; flex-wrap:wrap; gap:14px; padding-top:4px;}
+  .jogador-circulo{position:relative; width:104px; height:104px; border:none; padding:0; background:none; cursor:pointer; -webkit-tap-highlight-color:transparent;}
+  .jogador-circulo:disabled{cursor:default; opacity:0.6;}
+  .jogador-circulo-svg{width:100%; height:100%; display:block;}
+  .jogador-circulo-borda{fill:#fff; stroke:var(--navy); stroke-width:2.5;}
+  .jogador-circulo:not(:disabled):hover .jogador-circulo-borda, .jogador-circulo:not(:disabled):focus-visible .jogador-circulo-borda{stroke:var(--gold); fill:#FFFBEA;}
+  .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; font-size:8.5px; fill:var(--text); letter-spacing:0.01em;}
+  .jogador-circulo-numero{position:absolute; top:50%; left:50%; transform:translate(-50%,-58%); font-family:'Oswald',sans-serif; font-weight:700; font-size:30px; color:var(--navy); line-height:1; pointer-events:none;}
+  .jogador-circulo-badge{position:absolute; top:-2px; right:-2px; background:var(--green); color:#fff; border-radius:50%; min-width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'Space Mono',monospace; box-shadow:0 0 0 2px #fff; pointer-events:none;}
+  .jogador-circulo-saude{position:absolute; top:2px; left:2px; font-size:13px; display:flex; gap:1px; pointer-events:none;}
   .team-chip{display:inline-block; padding:4px 10px; border-radius:6px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08); line-height:1.3;}
   .team-chip.block{display:block; width:100%; text-align:center; box-sizing:border-box;}
   .score-input{width:56px; text-align:center; font-family:'Space Mono',monospace; font-weight:700;}
@@ -368,6 +378,14 @@
       <button class="btn secondary" id="cancelarEditarRegulamentoBtn">Cancelar</button>
       <button class="btn" id="salvarRegulamentoBtn">Salvar</button>
     </div>
+</div>
+
+<div class="modal-overlay" id="lancamentoJogadorModal">
+  <div class="modal-box" style="max-width:420px;">
+    <button class="modal-close" id="closeLancamentoJogadorModal">&times;</button>
+    <div id="lancamentoJogadorHeader" style="margin-bottom:6px;"></div>
+    <p class="hint">Toque na ocorrência que aconteceu com este atleta. Pode marcar mais de uma sem fechar — o número entre parênteses mostra quantas vezes já foi lançada.</p>
+    <div id="lancamentoJogadorBody"></div>
   </div>
 </div>
 
@@ -8465,6 +8483,7 @@ const FECHAR_MODAL_POR_ID = {
   solicitacoesPrivacidadeModal: fecharSolicitacoesPrivacidadeModal,
   editarAvisoPrivacidadeModal: fecharEditarAvisoPrivacidadeModal,
   editarRegulamentoModal: fecharEditarRegulamentoModal,
+  lancamentoJogadorModal: fecharLancamentoJogadorModal,
 };
 /* genericAlertModal é reaproveitado tanto por showAlert() (só um botão "OK") quanto por
    showConfirm() (dois botões) -- Esc precisa se comportar como "Cancelar" quando os dois
@@ -8724,26 +8743,37 @@ function buildGameDetailHtml(gameId){
 
   function rosterHtml(inscritos, side){
     if(inscritos.length===0) return `<p class="hint">Nenhum inscrito cadastrado nesta modalidade/gênero para esta equipe. Cadastre em "Inscritos".</p>`;
-    return inscritos.map(a=>{
+    return `<div class="escalacao-grid">` + inscritos.map(a=>{
       // Dado de saúde (LGPD Art. 5º/11 -- dado pessoal sensível): a aba Jogos é pública
       // (qualquer visitante vê o placar/escalação sem login), então só quem realmente
       // precisa (admin, ou o representante da própria Equipe do inscrito) vê o detalhe
       // de alergia/restrição -- antes desta correção, qualquer visitante via isso ao
       // abrir o detalhe de um jogo.
       const podeVerSaude = isAdmin || (accessoEquipeId && accessoEquipeId===a.teamId);
-      const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}" style="cursor:help; margin-left:6px;">🏥</span>` : '';
-      const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}" style="cursor:help; margin-left:4px;">🍽️</span>` : '';
-      const numeroTag = a.numeroUniforme!=null ? `<span class="mono" style="font-weight:700; color:var(--navy); margin-right:6px;">#${a.numeroUniforme}</span>` : '';
-      return `<div class="game-card" data-inscrito="${a.id}" data-side="${side}">
-      <div class="game-top"><span style="font-family:'Oswald',sans-serif; font-size:14.5px;">${numeroTag}${escPdf(a.nome)}${alergiaTag}${restricaoTag}</span></div>
-      <div class="pill-group">
-        ${tiposModalidade.map(tipo=>{
-          const count = sumula.eventos.filter(e=>e.studentId===a.id && e.tipo===tipo.key).length;
-          return `<button class="pill lancamentoBtn" data-tipo="${tipo.key}" ${(!isAdmin || game.wo)?'disabled':''}>${escPdf(tipo.label)}${count>0?` (${count})`:''}</button>`;
-        }).join('')}
-      </div>
-    </div>`;
-    }).join('');
+      const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}">🏥</span>` : '';
+      const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}">🍽️</span>` : '';
+      const totalLancamentos = sumula.eventos.filter(e=>e.studentId===a.id).length;
+      const pathId = `jc-nome-path-${side}-${a.id}`;
+      const desabilitado = !isAdmin || game.wo;
+      // Abre um popup pra escolher a variável (ver abrirLancamentoJogadorModal) --
+      // substitui a fileira de botões que existia solta embaixo do nome de cada
+      // jogador (pedido explícito: "escalação pouco dinâmica para localizar e
+      // registrar uma ação de um jogador"). O nome contornando a parte de baixo do
+      // círculo por dentro usa <textPath> do SVG -- funciona com qualquer tamanho de
+      // nome, mas nomes bem longos podem ficar apertados; ver comentário de
+      // acompanhamento sobre isso, é normal precisar de um ajuste fino depois de ver
+      // renderizado de verdade num navegador.
+      return `<button class="jogador-circulo" data-inscrito="${a.id}" data-side="${side}" ${desabilitado?'disabled':''} aria-label="Lançar ocorrência para ${escPdf(a.nome)}${a.numeroUniforme!=null?', número '+a.numeroUniforme:''}${totalLancamentos>0?`, ${totalLancamentos} lançamento(s) já registrado(s)`:''}">
+        <svg viewBox="0 0 120 120" class="jogador-circulo-svg" aria-hidden="true">
+          <circle cx="60" cy="60" r="56" class="jogador-circulo-borda"/>
+          <path id="${pathId}" d="M 16,64 A 46,46 0 0 0 104,64" fill="none"/>
+          <text class="jogador-circulo-nome"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escPdf(a.nome)}</textPath></text>
+        </svg>
+        <span class="jogador-circulo-numero">${a.numeroUniforme!=null?a.numeroUniforme:'?'}</span>
+        ${totalLancamentos>0?`<span class="jogador-circulo-badge">${totalLancamentos}</span>`:''}
+        ${(alergiaTag||restricaoTag)?`<span class="jogador-circulo-saude">${alergiaTag}${restricaoTag}</span>`:''}
+      </button>`;
+    }).join('') + `</div>`;
   }
 
   return `
@@ -8817,6 +8847,78 @@ function buildGameDetailHtml(gameId){
    dentro de `panelEl` (o container deste jogo específico), nunca em document inteiro,
    já que vários jogos da lista podem existir na página ao mesmo tempo (só um fica
    expandido por vez, mas essa é a forma correta de evitar conflito entre eles). */
+/* Popup de lançamento por jogador -- substitui a fileira de botões que ficava solta
+   embaixo do nome de cada jogador na escalação (ver rosterHtml, dentro de
+   buildGameDetailHtml) por um único popup, aberto ao tocar no círculo do jogador.
+   Guarda qual jogo/jogador/lado está aberto no momento (só um por vez, é um modal único
+   e global, igual todos os outros modais do app) pra saber o que re-renderizar a cada
+   lançamento, sem precisar fechar e abrir de novo entre um lançamento e outro (pedido
+   explícito: "Pode marcar mais de uma sem fechar"). */
+let lancamentoJogadorAtual = null; // {gameId, studentId, side} ou null
+function abrirLancamentoJogadorModal(gameId, studentId, side){
+  if(!isAdmin) return;
+  const game = STATE.games.find(g=>g.id===gameId);
+  if(!game || game.wo) return;
+  lancamentoJogadorAtual = {gameId, studentId, side};
+  renderLancamentoJogadorModalBody();
+  document.getElementById('lancamentoJogadorModal').classList.add('open');
+}
+function fecharLancamentoJogadorModal(){
+  lancamentoJogadorAtual = null;
+  document.getElementById('lancamentoJogadorModal').classList.remove('open');
+}
+function renderLancamentoJogadorModalBody(){
+  if(!lancamentoJogadorAtual) return;
+  const {gameId, studentId, side} = lancamentoJogadorAtual;
+  const game = STATE.games.find(g=>g.id===gameId);
+  const inscrito = STATE.inscritos.find(a=>a.id===studentId);
+  if(!game || !inscrito){ fecharLancamentoJogadorModal(); return; } // sumiu enquanto o popup estava aberto (removido/jogo apagado) -- fecha em vez de mostrar algo quebrado
+  const sumula = getSumula(gameId);
+  const tiposModalidade = sumulaTiposDaModalidade(game.modalidade);
+  const numeroTxt = inscrito.numeroUniforme!=null ? `#${inscrito.numeroUniforme} ` : '';
+
+  document.getElementById('lancamentoJogadorHeader').innerHTML =
+    `<h2 style="color:var(--navy); margin:0;">${numeroTxt}${escPdf(inscrito.nome)}</h2>
+     <p class="hint" style="margin:2px 0 0;">${teamChip(side==='A'?game.teamA:game.teamB, game.genero)} · ${escPdf(game.modalidade)}</p>`;
+
+  document.getElementById('lancamentoJogadorBody').innerHTML = tiposModalidade.length===0
+    ? '<p class="hint">Esta modalidade não tem nenhuma variável de súmula cadastrada -- veja em "Ferramentas de administração" → "Adicionar nova variável de súmula".</p>'
+    : `<div class="pill-group">${tiposModalidade.map(tipo=>{
+        const count = sumula.eventos.filter(e=>e.studentId===studentId && e.tipo===tipo.key).length;
+        return `<button class="pill lancamentoJogadorTipoBtn" data-tipo="${tipo.key}">${escPdf(tipo.label)}${count>0?` (${count})`:''}</button>`;
+      }).join('')}</div>`;
+
+  document.querySelectorAll('.lancamentoJogadorTipoBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=> registrarLancamentoJogador(btn.dataset.tipo));
+  });
+}
+function registrarLancamentoJogador(tipoKey){
+  if(!lancamentoJogadorAtual) return;
+  const {gameId, studentId, side} = lancamentoJogadorAtual;
+  const game = STATE.games.find(g=>g.id===gameId);
+  if(!game || game.wo) return; // o jogo pode ter virado W.O. enquanto o popup estava aberto
+  const sumula = getSumula(gameId);
+  const evento = {id:nextEventoId(), studentId, teamSide:side, tipo:tipoKey, ts:Date.now()};
+  sumula.eventos.push(evento);
+  recomputarPlacarSumula(game);
+  markDirty();
+  // syncMarcarPendente garante reenvio no próximo ciclo mesmo se o envio imediato abaixo
+  // falhar (rede instável no exato momento do clique) -- sumula_evento agora faz parte
+  // do mecanismo genérico de detecção/reenvio (ver SYNC_TABELAS_ESPECIAIS), não depende
+  // só do "fire and forget" abaixo, que existe só pra chegar mais rápido nos outros
+  // dispositivos quando dá certo de primeira.
+  syncMarcarPendente('sumula_evento', evento.id);
+  syncEnviarLote([{id:`sumula_evento:${evento.id}`, tabela:'sumula_evento', registro_id:String(evento.id), dados:{...evento, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
+  renderScoreboard();
+  renderLancamentoJogadorModalBody(); // atualiza as contagens dentro do próprio popup, sem fechar
+  // Também atualiza o painel por baixo (badge de lançamentos no círculo, resumo, registro
+  // cronológico) se ele ainda estiver expandido -- o popup é um modal à parte, por cima.
+  if(expandedGameId===gameId){
+    const card = document.querySelector(`.game-row[data-id="${gameId}"]`);
+    const panel = card ? card.querySelector('.game-row-panel') : null;
+    if(panel){ panel.innerHTML = buildGameDetailHtml(gameId); wireGameDetailPanelEvents(gameId, panel); }
+  }
+}
 function wireGameDetailPanelEvents(gameId, panelEl){
   let game = STATE.games.find(g=>g.id===gameId);
   if(!game || !panelEl) return;
@@ -8859,26 +8961,12 @@ function wireGameDetailPanelEvents(gameId, panelEl){
   const obsEl = panelEl.querySelector('.sdObservacoes');
   if(obsEl) obsEl.addEventListener('input', ()=>{ sumula.observacoes = obsEl.value; markDirty(); });
 
-  panelEl.querySelectorAll('.lancamentoBtn').forEach(btn=>{
+  panelEl.querySelectorAll('.jogador-circulo').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      if(!isAdmin) return;
+      if(!isAdmin || btn.disabled) return;
       refrescarGame();
       if(game.wo) return; // nunca lança evento num jogo já resolvido por W.O. (ver recomputarPlacarSumula)
-      const card = btn.closest('[data-inscrito]');
-      const studentId = Number(card.dataset.inscrito);
-      const side = card.dataset.side;
-      const evento = {id:nextEventoId(), studentId, teamSide:side, tipo:btn.dataset.tipo, ts:Date.now()};
-      sumula.eventos.push(evento);
-      recomputarPlacarSumula(game);
-      markDirty();
-      // syncMarcarPendente garante reenvio no próximo ciclo mesmo se o envio imediato
-      // abaixo falhar (rede instável no exato momento do clique) -- sumula_evento agora
-      // faz parte do mecanismo genérico de detecção/reenvio (ver SYNC_TABELAS_ESPECIAIS),
-      // não depende só do "fire and forget" abaixo, que existe só pra chegar mais rápido
-      // nos outros dispositivos quando dá certo de primeira.
-      syncMarcarPendente('sumula_evento', evento.id);
-      syncEnviarLote([{id:`sumula_evento:${evento.id}`, tabela:'sumula_evento', registro_id:String(evento.id), dados:{...evento, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
-      renderScoreboard(); rerender();
+      abrirLancamentoJogadorModal(gameId, Number(btn.dataset.inscrito), btn.dataset.side);
     });
   });
   panelEl.querySelectorAll('.removeEvento').forEach(btn=>{
@@ -10295,6 +10383,7 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('cancelarEditarAvisoPrivacidadeBtn').addEventListener('click', fecharEditarAvisoPrivacidadeModal);
   document.getElementById('salvarAvisoPrivacidadeBtn').addEventListener('click', salvarAvisoPrivacidade);
   document.getElementById('closeEditarRegulamentoModal').addEventListener('click', fecharEditarRegulamentoModal);
+  document.getElementById('closeLancamentoJogadorModal').addEventListener('click', fecharLancamentoJogadorModal);
   document.getElementById('cancelarEditarRegulamentoBtn').addEventListener('click', fecharEditarRegulamentoModal);
   document.getElementById('salvarRegulamentoBtn').addEventListener('click', salvarRegulamentoCompleto);
   document.getElementById('clearModal').addEventListener('click', (e)=>{ if(e.target.id==='clearModal') closeClearModal(); });
