@@ -8749,7 +8749,18 @@ function buildGameDetailHtml(gameId){
 
   function rosterHtml(inscritos, side){
     if(inscritos.length===0) return `<p class="hint">Nenhum inscrito cadastrado nesta modalidade/gênero para esta equipe. Cadastre em "Inscritos".</p>`;
-    return `<div class="escalacao-grid">` + inscritos.map(a=>{
+    // Ordem crescente pelo número do uniforme -- pedido explícito, depois de ver o novo
+    // design circular ("melhorias estéticas: organize os círculos por ordem
+    // crescente"). Quem não tem número cadastrado (null) vai pro final, já que não há
+    // pelo que ordenar -- não teria sentido nenhum tratá-lo como "0" e colocar na
+    // frente de quem realmente veste a camisa 1.
+    const ordenados = inscritos.slice().sort((x,y)=>{
+      if(x.numeroUniforme==null && y.numeroUniforme==null) return 0;
+      if(x.numeroUniforme==null) return 1;
+      if(y.numeroUniforme==null) return -1;
+      return x.numeroUniforme - y.numeroUniforme;
+    });
+    return `<div class="escalacao-grid">` + ordenados.map(a=>{
       // Dado de saúde (LGPD Art. 5º/11 -- dado pessoal sensível): a aba Jogos é pública
       // (qualquer visitante vê o placar/escalação sem login), então só quem realmente
       // precisa (admin, ou o representante da própria Equipe do inscrito) vê o detalhe
