@@ -120,7 +120,7 @@
   .jogador-circulo-borda{fill:#fff; stroke:var(--navy); stroke-width:2.5;}
   .jogador-circulo:not(:disabled):hover .jogador-circulo-borda, .jogador-circulo:not(:disabled):focus-visible .jogador-circulo-borda{stroke:var(--gold); fill:#FFFBEA;}
   .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; fill:var(--text); letter-spacing:0.01em;} /* font-size vem inline por jogador, ver rosterHtml() */
-  .jogador-circulo-numero{position:absolute; top:50%; left:50%; transform:translate(-50%,-58%); font-family:'Oswald',sans-serif; font-weight:700; font-size:30px; color:var(--navy); line-height:1; pointer-events:none;}
+  .jogador-circulo-numero-svg{font-family:'Oswald',sans-serif; font-weight:700; font-size:42px; fill:var(--navy);}
   .jogador-circulo-badge{position:absolute; top:-2px; right:-2px; background:var(--green); color:#fff; border-radius:50%; min-width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'Space Mono',monospace; box-shadow:0 0 0 2px #fff; pointer-events:none;}
   .jogador-circulo-saude{position:absolute; top:2px; left:2px; font-size:13px; display:flex; gap:1px; pointer-events:none;}
   .team-chip{display:inline-block; padding:4px 10px; border-radius:6px; font-weight:700; box-shadow:inset 0 0 0 1px rgba(0,0,0,0.08); line-height:1.3;}
@@ -8770,37 +8770,32 @@ function buildGameDetailHtml(gameId){
       const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}">🏥</span>` : '';
       const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}">🍽️</span>` : '';
       const totalLancamentos = sumula.eventos.filter(e=>e.studentId===a.id).length;
-      const pathId = `jc-nome-path-${side}-${a.id}`;
       const desabilitado = !isAdmin || game.wo;
       // Abre um popup pra escolher a variável (ver abrirLancamentoJogadorModal) --
       // substitui a fileira de botões que existia solta embaixo do nome de cada
       // jogador (pedido explícito: "escalação pouco dinâmica para localizar e
-      // registrar uma ação de um jogador"). O nome contornando a parte de baixo do
-      // círculo por dentro usa <textPath> do SVG -- funciona com qualquer tamanho de
-      // nome, mas nomes bem longos podem ficar apertados; ver comentário de
-      // acompanhamento sobre isso, é normal precisar de um ajuste fino depois de ver
-      // renderizado de verdade num navegador.
-      // Geometria do arco: raio 44 (a caber com folga dentro da borda do círculo, raio
-      // 56), cordas exatamente na altura do centro (y=60) -- dá um semicírculo de
-      // verdade (180°) na parte de baixo, com comprimento conhecido (π×raio), o que
-      // permite calcular o tamanho de fonte que cabe. Tamanho de fonte MAIOR pra nomes
-      // curtos, menor pra nomes longos -- sempre o máximo que cabe sem estourar o arco
-      // (pedido explícito: "ampliar ao máximo possível para que fique legível e dentro
-      // do círculo"). ~0.56 é uma estimativa de largura média de caractere numa fonte
-      // sans-serif nesse peso -- não é exato (fonte de verdade só se sabe rendendo num
-      // navegador de verdade), por isso o textLength abaixo funciona como uma garantia
-      // a mais: força o texto a nunca ultrapassar o arco, comprimindo um pouco os
-      // espaçamentos se precisar, mesmo que a estimativa de tamanho erre pra mais.
-      const raioTexto = 44;
-      const comprimentoArco = Math.PI * raioTexto;
-      const tamanhoFonte = Math.max(6.5, Math.min(15, comprimentoArco / (Math.max(a.nome.length,1) * 0.56)));
+      // Design final aprovado (opção "D2 refinado", depois de comparar várias
+      // alternativas visuais com mockups reais em conversa): número grande e reto,
+      // centralizado no meio do círculo; nome reto (sem curva) logo abaixo, mais perto
+      // do número. Abandona de propósito o texto curvado ao longo do arco de antes --
+      // o recurso usado pra evitar que o nome estourasse a curva (textLength com
+      // lengthAdjust="spacingAndGlyphs") deformava o FORMATO das letras pra forçar
+      // caber no espaço, o que ficava visualmente esquisito ("distorcido"). Número e
+      // nome ficam os DOIS dentro do mesmo <svg> (não mais um <span> de HTML por cima)
+      // -- mais simples e preciso (mesmo sistema de coordenadas pros dois, sem precisar
+      // converter entre porcentagem de CSS e unidade de SVG), e o pointer-events:none
+      // já existente em .jogador-circulo-svg cobre os dois de graça.
+      // Tamanho do nome: 11.5px é o tamanho aprovado pra um nome "normal" -- só
+      // encolhe (nunca deforma letra) se o nome for tão comprido que estouraria a
+      // largura disponível dentro do círculo naquela altura.
+      const larguraDisponivelNome = 84;
+      const fonteNome = Math.max(6.5, Math.min(11.5, larguraDisponivelNome / (Math.max(a.nome.length,1) * 0.56)));
       return `<button class="jogador-circulo" data-inscrito="${a.id}" data-side="${side}" ${desabilitado?'disabled':''} aria-label="Lançar ocorrência para ${escPdf(a.nome)}${a.numeroUniforme!=null?', número '+a.numeroUniforme:''}${totalLancamentos>0?`, ${totalLancamentos} lançamento(s) já registrado(s)`:''}">
         <svg viewBox="0 0 120 120" class="jogador-circulo-svg" aria-hidden="true">
           <circle cx="60" cy="60" r="56" class="jogador-circulo-borda"/>
-          <path id="${pathId}" d="M 16,60 A 44,44 0 0 0 104,60" fill="none"/>
-          <text class="jogador-circulo-nome" style="font-size:${tamanhoFonte.toFixed(1)}px;"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle" textLength="${(comprimentoArco*0.94).toFixed(0)}" lengthAdjust="spacingAndGlyphs">${escPdf(a.nome)}</textPath></text>
+          <text x="60" y="62" text-anchor="middle" class="jogador-circulo-numero-svg">${a.numeroUniforme!=null?a.numeroUniforme:'?'}</text>
+          <text x="60" y="80" text-anchor="middle" class="jogador-circulo-nome" style="font-size:${fonteNome.toFixed(1)}px;">${escPdf(a.nome)}</text>
         </svg>
-        <span class="jogador-circulo-numero">${a.numeroUniforme!=null?a.numeroUniforme:'?'}</span>
         ${totalLancamentos>0?`<span class="jogador-circulo-badge">${totalLancamentos}</span>`:''}
         ${(alergiaTag||restricaoTag)?`<span class="jogador-circulo-saude">${alergiaTag}${restricaoTag}</span>`:''}
       </button>`;
