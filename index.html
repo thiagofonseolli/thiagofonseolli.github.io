@@ -7572,6 +7572,19 @@ function parseImportJogosRows(header, rows){
   const idxModalidade = idx('Modalidade');
   const idxGenero = idx('Genero')>=0 ? idx('Genero') : idx('Gênero');
   const idxTurma = idx('Turma');
+  // Colunas opcionais -- só fazem sentido numa CORREÇÃO de tabela (confronto que já
+  // existe no app, mas mudou de data e/ou de gênero desde a última importação). Sem
+  // elas, o comportamento é o de sempre: casa pela combinação atual (Turma+modalidade+
+  // gênero+DATA), então uma mudança de HORÁRIO/LOCAL no mesmo dia já atualiza sozinha,
+  // mas uma mudança de DATA ou de GÊNERO criaria um confronto novo em vez de atualizar
+  // o existente (motivo: a chave de correspondência inclui data e gênero de propósito,
+  // pra permitir a mesma dupla jogar a mesma modalidade duas vezes em dias diferentes
+  // -- ver commitImportJogosPlan/Porta Bandeira do 2º ano). Preenchendo "Data Antiga" e/ou
+  // "Genero Antigo", a linha passa a indicar EXPLICITAMENTE qual confronto já existente
+  // deve ser atualizado, sem ambiguidade nem depender de nenhuma lógica de pareamento
+  // automático entre "antes" e "depois".
+  const idxDataAntiga = idx('Data Antiga');
+  const idxGeneroAntigo = idx('Genero Antigo')>=0 ? idx('Genero Antigo') : idx('Gênero Antigo');
 
   if(idxTurma<0 || idxModalidade<0){
     return {plano:[], erroGeral:'O arquivo não parece seguir o modelo esperado — falta a coluna "Turma" ou "Modalidade". Baixe o modelo atualizado e preencha a partir dele.'};
@@ -7606,11 +7619,22 @@ function parseImportJogosRows(header, rows){
 
     const local = idxLocal>=0 ? String(cols[idxLocal]||'').trim() : '';
 
+    let dataAntiga = null;
+    if(idxDataAntiga>=0 && String(cols[idxDataAntiga]||'').trim()){
+      dataAntiga = parseDataFlexivel(cols[idxDataAntiga]);
+      if(dataAntiga===null){ plano.push({linha:linhaNum, ok:false, erro:`Data Antiga "${cols[idxDataAntiga]}" não reconhecida — use AAAA-MM-DD ou DD/MM/AAAA`}); return; }
+    }
+    let generoAntigo = null;
+    if(idxGeneroAntigo>=0 && String(cols[idxGeneroAntigo]||'').trim()){
+      generoAntigo = parseGeneroFlexivel(cols[idxGeneroAntigo]);
+      if(!generoAntigo){ plano.push({linha:linhaNum, ok:false, erro:`Genero Antigo "${cols[idxGeneroAntigo]}" não reconhecido — use Feminino, Masculino ou Misto`}); return; }
+    }
+
     plano.push({
       linha: linhaNum, ok:true, modalidade, genero,
       teamA: equipesDaTurma[0].id, teamB: equipesDaTurma[1].id,
       teamALabel: equipesDaTurma[0].label, teamBLabel: equipesDaTurma[1].label,
-      data, hora, local,
+      data, hora, local, dataAntiga, generoAntigo,
     });
   });
 
@@ -7653,10 +7677,16 @@ function openImportJogosReviewModal(plano){
     </div>`;
   }
   if(validos.length){
+    const correcoes = validos.filter(p=>p.dataAntiga!=null || p.generoAntigo!=null).length;
     html += `<div style="max-height:360px; overflow:auto; border:1px solid var(--border); border-radius:6px;">
-    <table><thead><tr><th>Data</th><th>Horário</th><th>Local</th><th>Modalidade</th><th>Gênero</th><th>Confronto</th></tr></thead><tbody>
-    ${validos.map(p=>`<tr><td class="mono">${p.data?p.data.split('-').reverse().join('/'):'<span class="hint">—</span>'}</td><td class="mono">${escPdf(p.hora||'—')}</td><td>${escPdf(p.local||'—')}</td><td>${escPdf(p.modalidade)}</td><td>${generoJogoLabel(p.genero)}</td><td>${escPdf(p.teamALabel)} × ${escPdf(p.teamBLabel)}</td></tr>`).join('')}
-    </tbody></table></div>`;
+    <table><thead><tr><th>Data</th><th>Horário</th><th>Local</th><th>Modalidade</th><th>Gênero</th><th>Confronto</th><th></th></tr></thead><tbody>
+    ${validos.map(p=>{
+      const ehCorrecao = p.dataAntiga!=null || p.generoAntigo!=null;
+      const detalheCorrecao = ehCorrecao ? [p.dataAntiga!=null?`data era ${p.dataAntiga.split('-').reverse().join('/')}`:null, p.generoAntigo!=null?`gênero era ${generoJogoLabel(p.generoAntigo)}`:null].filter(Boolean).join(', ') : '';
+      return `<tr><td class="mono">${p.data?p.data.split('-').reverse().join('/'):'<span class="hint">—</span>'}</td><td class="mono">${escPdf(p.hora||'—')}</td><td>${escPdf(p.local||'—')}</td><td>${escPdf(p.modalidade)}</td><td>${generoJogoLabel(p.genero)}</td><td>${escPdf(p.teamALabel)} × ${escPdf(p.teamBLabel)}</td><td>${ehCorrecao?`<span class="badge" title="${escPdf(detalheCorrecao)}">✏️ correção</span>`:''}</td></tr>`;
+    }).join('')}
+    </tbody></table></div>
+    ${correcoes>0?`<p class="hint" style="margin-top:6px;">${correcoes} linha(s) marcada(s) "✏️ correção" vão atualizar um confronto já existente (encontrado pelos valores antigos) em vez de criar um novo — passe o mouse pra ver o que mudou.</p>`:''}`;
   }
   body.innerHTML = html;
   const confirmBtn = document.getElementById('confirmImportJogosReviewBtn');
@@ -7673,11 +7703,18 @@ function closeImportJogosReviewModal(){
    legitimamente jogar a mesma modalidade mais de uma vez, em dias diferentes (visto na
    prática na TABELA_JIM_2026: algumas turmas do 2º ano jogam Porta Bandeira/Queimada
    duas vezes, em datas distintas) -- sem considerar a data aqui, a segunda importação
-   substituiria a primeira em vez de criar um segundo jogo. */
+   substituiria a primeira em vez de criar um segundo jogo.
+   Quando a linha vem com "Data Antiga" e/ou "Genero Antigo" preenchidos (ver
+   parseImportJogosRows), a busca usa esses valores ANTIGOS em vez dos novos -- é assim
+   que uma CORREÇÃO de tabela (confronto que só mudou de data, ou de misto pra
+   masculino/feminino) atualiza o jogo já existente, em vez de criar um confronto
+   paralelo (a chave normal, com a data/gênero NOVOS, nunca bateria com o jogo antigo). */
 function commitImportJogosPlan(){
   let criados = 0, atualizados = 0;
   pendingImportJogosPlan.forEach(p=>{
-    let jogo = STATE.games.find(g=> g.modalidade===p.modalidade && g.genero===p.genero && g.data===p.data &&
+    const dataBusca = p.dataAntiga!=null ? p.dataAntiga : p.data;
+    const generoBusca = p.generoAntigo!=null ? p.generoAntigo : p.genero;
+    let jogo = STATE.games.find(g=> g.modalidade===p.modalidade && g.genero===generoBusca && g.data===dataBusca &&
       ((g.teamA===p.teamA && g.teamB===p.teamB) || (g.teamA===p.teamB && g.teamB===p.teamA)));
     if(!jogo){
       jogo = {id: nextGameId(), modalidade:p.modalidade, genero:p.genero, teamA:p.teamA, teamB:p.teamB,
@@ -7687,7 +7724,7 @@ function commitImportJogosPlan(){
     } else {
       atualizados++;
     }
-    jogo.data = p.data; jogo.hora = p.hora; jogo.local = p.local;
+    jogo.data = p.data; jogo.hora = p.hora; jogo.local = p.local; jogo.genero = p.genero;
   });
   markDirty();
   if(criados>0) registrarOperacao('jogos_importados_lote', `${criados} confronto(s) criado(s) por importação em lote${atualizados?`, ${atualizados} já existente(s) atualizado(s)`:''}`);
@@ -7696,18 +7733,19 @@ function commitImportJogosPlan(){
   showAlert(`Importação concluída!\n\n${criados} confronto(s) novo(s) criado(s).\n${atualizados} confronto(s) já existiam e tiveram data/horário/local atualizados.`);
 }
 function gerarModeloImportacaoJogosXlsx(){
-  const header = ['Data','Horário','Local','Modalidade','Genero','Turma'];
+  const header = ['Data','Horário','Local','Modalidade','Genero','Turma','Data Antiga','Genero Antigo'];
   const turmasRef = `Equipes cadastradas: ${STATE.teams.map(t=>t.label).join(' | ') || '(nenhuma equipe cadastrada ainda)'}`;
   const sections = [
     {tipo:'titulo', cells:[`Confrontos — ${STATE.eventName}`]},
-    {tipo:'instrucoes', cells:[`Uma linha por confronto. "Turma" é o prefixo comum das duas Equipes que vão se enfrentar (ex.: "EF4AM" encontra "EF4AM - VERMELHO" e "EF4AM - VERDE" — uma Turma sempre tem exatamente 2 Equipes, que só jogam entre si). ${turmasRef}. Data em AAAA-MM-DD ou DD/MM/AAAA; Horário em HH:MM ou "8h55". Modalidade e Genero têm uma lista pra escolher — clique na célula e selecione.`]},
+    {tipo:'instrucoes', cells:[`Uma linha por confronto. "Turma" é o prefixo comum das duas Equipes que vão se enfrentar (ex.: "EF4AM" encontra "EF4AM - VERMELHO" e "EF4AM - VERDE" — uma Turma sempre tem exatamente 2 Equipes, que só jogam entre si). ${turmasRef}. Data em AAAA-MM-DD ou DD/MM/AAAA; Horário em HH:MM ou "8h55". Modalidade e Genero têm uma lista pra escolher — clique na célula e selecione. "Data Antiga" e "Genero Antigo" são opcionais -- só preencha se estiver CORRIGINDO um confronto que mudou de data ou de gênero desde a última importação (ex.: virou "misto" pra "masculino"); informe ali o valor ANTIGO (como já estava importado), e nas colunas Data/Genero normais o valor NOVO -- assim o app encontra e atualiza o confronto certo, em vez de criar um duplicado.`]},
     {tipo:'blank', cells:[]},
     {tipo:'header', cells:header},
   ];
-  const colWidths = [14, 12, 22, 18, 14, 26];
+  const colWidths = [14, 12, 22, 18, 14, 26, 14, 14];
   const dataValidations = [
     {col: header.indexOf('Modalidade')+1, options: STATE.modalidades},
     {col: header.indexOf('Genero')+1, options: ['Feminino','Masculino','Misto']},
+    {col: header.indexOf('Genero Antigo')+1, options: ['Feminino','Masculino','Misto']},
   ];
   const bytes = buildStyledXlsx('Confrontos', sections, colWidths, dataValidations);
   const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
