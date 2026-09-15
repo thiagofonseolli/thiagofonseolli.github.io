@@ -3343,19 +3343,31 @@ function renderTotpModalPedirSenha(acao){
       renderTotpModalSetup();
     } else if(acao==='desativar'){
       STATE.adminTotpEnabled = false; STATE.adminTotpSecret = null; STATE.adminTotpBackupCodes = [];
-      markDirty();
       registrarOperacao('totp_desativado', 'Verificação em duas etapas desativada');
+      // Aguarda o salvamento de VERDADE (não só markDirty()) antes de mostrar sucesso --
+      // uma mudança de segurança crítica dessas não pode ficar só "pendente" em
+      // silêncio; se a pessoa fechar a aba logo em seguida achando que já estava
+      // salvo, o valor nunca chegaria a valer de fato (ver renderTotpModalAvisoSalvamento()).
+      const salvouOk = await saveState();
       renderTotpModalStatus();
+      if(!salvouOk) renderTotpModalAvisoSalvamento();
     } else if(acao==='regerar'){
       const codigos = gerarCodigosBackupTotp(8);
       const hashes = [];
       for(const c of codigos) hashes.push(await gerarHashSegredo(c));
       STATE.adminTotpBackupCodes = hashes.map(h=>({...h, usado:false}));
-      markDirty();
       registrarOperacao('totp_backup_regerado', 'Novos códigos de backup da verificação em duas etapas gerados');
-      renderTotpModalMostrarBackup(codigos, false);
+      const salvouOk = await saveState();
+      renderTotpModalMostrarBackup(codigos, false, !salvouOk);
     }
   });
+}
+/* Mostra um aviso persistente (não é só um erro de formulário passageiro) quando uma
+   mudança de 2FA não conseguiu confirmar o salvamento na hora -- explica o que fazer
+   (não fechar a aba) em vez de deixar a pessoa achar que já está tudo certo. */
+function renderTotpModalAvisoSalvamento(){
+  const body = document.getElementById('totpModalBody');
+  body.insertAdjacentHTML('afterbegin', `<p class="hint" style="background:#FFF3F3; border:1px solid var(--crimson,#C0392B); color:var(--crimson,#C0392B); padding:8px 10px; border-radius:6px; margin-bottom:10px;">⚠️ Não consegui confirmar o salvamento agora (rede instável?). A mudança está guardada nesta aba e o app vai tentar de novo sozinho em instantes -- <strong>não feche esta aba/navegador</strong> até a barra de status no topo mostrar "Salvo", ou os dados voltam ao que estavam antes na próxima vez que o app for aberto.</p>`);
 }
 let _totpSetupSecretPendente = null; // só existe durante a configuração (entre mostrar o QR e confirmar) -- nunca salvo em STATE até a confirmação bater
 function renderTotpModalSetup(){
@@ -3395,14 +3407,20 @@ function renderTotpModalSetup(){
     for(const c of codigosBackup) hashes.push(await gerarHashSegredo(c));
     STATE.adminTotpBackupCodes = hashes.map(h=>({...h, usado:false}));
     _totpSetupSecretPendente = null;
-    markDirty();
     registrarOperacao('totp_ativado', 'Verificação em duas etapas ativada');
-    renderTotpModalMostrarBackup(codigosBackup, true);
+    // Aguarda o salvamento de VERDADE antes de considerar concluído -- ver comentário em
+    // renderTotpModalAvisoSalvamento(). Sem isso, a pessoa podia fechar a aba logo após
+    // ativar (achando que já estava tudo certo, já que os códigos de backup apareceram
+    // na tela) e a ativação nunca chegar a ser confirmada na nuvem -- exatamente o
+    // relato que motivou esta correção: "ativei ontem, hoje apareceu desabilitada".
+    const salvouOk = await saveState();
+    renderTotpModalMostrarBackup(codigosBackup, true, !salvouOk);
   });
 }
-function renderTotpModalMostrarBackup(codigos, ehAtivacao){
+function renderTotpModalMostrarBackup(codigos, ehAtivacao, houveErroSalvamento){
   const body = document.getElementById('totpModalBody');
   body.innerHTML = `
+    ${houveErroSalvamento ? `<p class="hint" style="background:#FFF3F3; border:1px solid var(--crimson,#C0392B); color:var(--crimson,#C0392B); padding:8px 10px; border-radius:6px;">⚠️ Não consegui confirmar o salvamento agora (rede instável?). Guarde os códigos abaixo mesmo assim, mas <strong>não feche esta aba/navegador</strong> até a barra de status no topo mostrar "Salvo" — sem isso, essa mudança pode não valer na próxima vez que o app for aberto (foi exatamente o que já aconteceu antes: ativado numa sessão, mas nunca confirmado na nuvem).</p>` : ''}
     <p class="hint" style="color:var(--green); font-weight:600;">${ehAtivacao ? '✓ Verificação em duas etapas ativada!' : '✓ Novos códigos de backup gerados.'}</p>
     <p class="hint">Guarde estes códigos num lugar seguro (fora do celular que tem o autenticador) — cada um funciona <strong>uma única vez</strong> no lugar do código de 6 dígitos, caso você perca o acesso ao aplicativo autenticador.${ehAtivacao ? ' Os códigos antigos, se existiam, deixaram de funcionar.' : ''} Esta é a ÚNICA vez que eles aparecem na tela.</p>
     <div class="card mono" style="background:var(--bg); text-align:center; font-size:15px; line-height:2;">${codigos.join('<br>')}</div>
