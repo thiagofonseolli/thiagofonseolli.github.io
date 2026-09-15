@@ -3077,7 +3077,19 @@ function inlineImagesForExport(stateCopy){
 }
 
 /* ===================== ADMIN LOGIN ===================== */
+/* Com a verificação em duas etapas ATIVADA, a sessão de admin nunca é restaurada
+   automaticamente entre uma recarga de página e outra -- login de admin sempre exige
+   senha + código nesse caso, mesmo dentro da mesma aba/sessão do navegador (pedido
+   explícito: "o cache do navegador não guarde informações de autenticação em duas
+   etapas. A todo login deve ser pedido o código autenticador"). Sem a verificação em
+   duas etapas ativada, mantém o comportamento de sempre (sessionStorage cobre o caso
+   comum de recarregar a página sem perder a sessão). */
 function restoreAdminSession(){
+  if(STATE.adminTotpEnabled){
+    try{ sessionStorage.removeItem(ADMIN_SESSION_KEY); }catch(e){}
+    isAdmin = false;
+    return;
+  }
   try{ isAdmin = sessionStorage.getItem(ADMIN_SESSION_KEY)==='1'; }catch(e){ isAdmin = false; }
 }
 /* Restaura o modo de acesso restrito de Equipe entre uma navegação e outra na mesma
@@ -3143,7 +3155,10 @@ async function attemptLoginTotp(){
     isAdmin = true;
     adminSenhaEmMemoria = senhaConfirmada;
     _loginSenhaConfirmadaAguardandoTotp = null;
-    try{ sessionStorage.setItem(ADMIN_SESSION_KEY,'1'); }catch(e){}
+    // Não grava em sessionStorage aqui de propósito -- com a verificação em duas etapas
+    // ativa, nada de autenticação fica guardado entre uma recarga de página e outra
+    // (ver restoreAdminSession()); recarregar a página sempre exige senha + código de
+    // novo, mesmo dentro da mesma aba.
     if(okBackup) markDirty(); // um código de backup foi consumido -- precisa salvar essa mudança
     registrarOperacao('login_admin', `Login de administrador${okBackup?' (com código de backup)':''}`);
     closeLoginModal();
