@@ -2414,7 +2414,7 @@ const SYNC_COLECOES = {
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
 const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
-const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','sumulaTiposHistorico','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','codigoAcessoCifraSalt'];
+const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','sumulaTiposHistorico','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','adminTotp','codigoAcessoCifraSalt'];
 
 function syncColecaoParaFora(nomeColecao, item){
   const cfg = SYNC_COLECOES[nomeColecao];
@@ -2500,8 +2500,19 @@ function syncConstruirLinha(tabela, registroId){
       crachaConfig: STATE.crachaConfig,
       editalHtml: STATE.editalHtml,
       avisoPrivacidadeHtml: STATE.avisoPrivacidadeHtml,
-      adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash, algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter,
-        totpEnabled: STATE.adminTotpEnabled, totpSecret: STATE.adminTotpSecret, totpBackupCodes: STATE.adminTotpBackupCodes},
+      adminAuth: {salt: STATE.adminPasswordSalt, hash: STATE.adminPasswordHash, algo: STATE.adminPasswordAlgo, iter: STATE.adminPasswordIter},
+      // Registro PRÓPRIO, separado de "adminAuth" de propósito -- ver comentário em
+      // STATE.adminTotpEnabled na definição do estado padrão. Antes, os campos de TOTP
+      // ficavam DENTRO do mesmo pacote da senha: qualquer dispositivo/aba que mudasse só
+      // a senha (ou tivesse qualquer outro motivo de reenviar "adminAuth") reconstruía o
+      // pacote INTEIRO a partir do que tinha em memória NAQUELE dispositivo -- se essa
+      // aba estivesse desatualizada (aberta antes de a verificação em duas etapas ser
+      // ativada em outro lugar), reenviava a versão STALE dos campos de TOTP junto,
+      // sobrescrevendo por cima a ativação de verdade. Separado em duas chaves
+      // independentes, mudar a senha nunca mais toca nos campos de TOTP (e vice-versa),
+      // eliminando esse risco de raiz -- não é mais uma questão de "torcer" pra nenhuma
+      // aba antiga reenviar por engano.
+      adminTotp: {enabled: STATE.adminTotpEnabled, secret: STATE.adminTotpSecret, backupCodes: STATE.adminTotpBackupCodes},
       codigoAcessoCifraSalt: STATE.codigoAcessoCifraSalt || null,
     };
     return {...base, dados: valores[registroId], deletado:false};
@@ -2625,8 +2636,16 @@ function syncAplicarLinha(linha){
     else if(registro_id==='crachaConfig') STATE.crachaConfig = dados;
     else if(registro_id==='editalHtml') STATE.editalHtml = sanitizeEditalHtml(dados);
     else if(registro_id==='avisoPrivacidadeHtml') STATE.avisoPrivacidadeHtml = sanitizeEditalHtml(dados);
-    else if(registro_id==='adminAuth'){ STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null;
-      STATE.adminTotpEnabled = !!dados.totpEnabled; STATE.adminTotpSecret = dados.totpSecret||null; STATE.adminTotpBackupCodes = Array.isArray(dados.totpBackupCodes) ? dados.totpBackupCodes : []; }
+    else if(registro_id==='adminAuth'){
+      STATE.adminPasswordSalt = dados.salt||null; STATE.adminPasswordHash = dados.hash||null; STATE.adminPasswordAlgo = dados.algo||null; STATE.adminPasswordIter = dados.iter||null;
+      // Compatibilidade com o formato ANTIGO (antes desta correção), que guardava os
+      // campos de TOTP juntos aqui dentro -- migra pra STATE assim mesmo, senão quem já
+      // tinha a verificação em duas etapas ativada antes desta correção existir a veria
+      // "desaparecer" no primeiro carregamento depois dela (o registro "adminTotp"
+      // separado só passa a existir depois do primeiro salvamento com o código novo).
+      if('totpEnabled' in dados){ STATE.adminTotpEnabled = !!dados.totpEnabled; STATE.adminTotpSecret = dados.totpSecret||null; STATE.adminTotpBackupCodes = Array.isArray(dados.totpBackupCodes) ? dados.totpBackupCodes : []; }
+    }
+    else if(registro_id==='adminTotp'){ STATE.adminTotpEnabled = !!dados.enabled; STATE.adminTotpSecret = dados.secret||null; STATE.adminTotpBackupCodes = Array.isArray(dados.backupCodes) ? dados.backupCodes : []; }
     else if(registro_id==='codigoAcessoCifraSalt') STATE.codigoAcessoCifraSalt = dados||null;
     return;
   }
