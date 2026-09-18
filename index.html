@@ -3940,6 +3940,28 @@ function computeStandings(){
   return rows;
 }
 function leaderOf(){ const rows = computeStandings(); return rows[0]; }
+/* Classificação separada por aglutinador (achado de uma revisão geral do app: até
+   aqui, aglutinadores existiam só como uma etiqueta em cada Equipe, sem NENHUM efeito
+   real na classificação -- ver comentário em STATE.aglutinadores). Agrupa as MESMAS
+   linhas já calculadas por computeStandings() (não recalcula nada -- reaproveita
+   pontos, critérios de desempate etc.) pelas Equipes que compartilham o mesmo
+   aglutinadorId, ranqueando cada grupo só entre si, na mesma ordem de desempate já
+   usada na Classificação Geral. Uma Equipe sem aglutinador (a imensa maioria, já que é
+   um recurso opcional) não aparece aqui -- só entra na Classificação Geral. Um
+   aglutinador com só 1 Equipe (ou nenhuma) fica de fora do retorno -- "classificar" um
+   grupo de 1 não diz nada. */
+function computeStandingsPorAglutinador(){
+  const rows = computeStandings();
+  const porGrupo = {};
+  rows.forEach(r=>{
+    const aglId = r.team.aglutinadorId;
+    if(aglId==null) return;
+    (porGrupo[aglId] = porGrupo[aglId]||[]).push(r);
+  });
+  return STATE.aglutinadores
+    .map(agl=> ({aglutinador: agl, rows: porGrupo[agl.id]||[]}))
+    .filter(g=> g.rows.length>=2);
+}
 
 /* ===================== HEADER / TITLE ===================== */
 function renderHeaderBlock(){
@@ -4246,7 +4268,7 @@ function renderTabOrderList(){
 
 /* ===================== PAINEL ===================== */
 function renderPainel(){
-  let html = classificacaoHtml() + `
+  let html = classificacaoHtml() + classificacaoPorAglutinadorHtml() + `
   <div class="card"><h2>Critérios de Desempate</h2>
     <p class="hint">O painel já ordena por total, saldo e pontos/gols marcados. Persistindo o empate, aplique manualmente, na ordem do regulamento:</p>
     <ol style="font-size:13.5px; line-height:1.6;">
@@ -9602,6 +9624,29 @@ function classificacaoHtml(){
   html += `</tbody></table></div>`;
   return html;
 }
+/* Uma tabela por aglutinador (ver computeStandingsPorAglutinador()) -- versão
+   simplificada da Classificação Geral (só posição/Equipe/Total), já que é uma
+   reclassificação de um SUBCONJUNTO de Equipes que já aparecem detalhadas na
+   Classificação Geral logo acima; quem quiser o extrato completo de uma delas já
+   encontra clicando na linha correspondente lá. Retorna string vazia se nenhum
+   aglutinador tiver 2+ Equipes atribuídas -- não aparece nada quando o recurso não
+   está em uso, em vez de uma seção vazia/confusa. */
+function classificacaoPorAglutinadorHtml(){
+  const grupos = computeStandingsPorAglutinador();
+  if(grupos.length===0) return '';
+  return grupos.map(g=>{
+    let html = `<div class="card"><h2>Classificação — ${escPdf(g.aglutinador.nome)}</h2>`;
+    if(g.aglutinador.regras) html += `<p class="hint">${escPdf(g.aglutinador.regras)}</p>`;
+    html += `<table><thead><tr><th>#</th><th>equipe</th><th>Total</th></tr></thead><tbody>`;
+    g.rows.forEach((r,i)=>{
+      const cls = i===0?'gold':i===1?'silver':i===2?'bronze':'';
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+      html += `<tr class="${cls}"><td>${medal}</td><td>${teamChip(r.team.id, null)}</td><td class="mono" style="font-weight:700;">${r.total}</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+    return html;
+  }).join('');
+}
 
 /* ===================== EDITAL =====================
    Aglutina em uma única aba: Regulamento (regras/pontuação + texto do edital + regras
@@ -10367,7 +10412,7 @@ function openPainelModal(){
     <img src="${LOGO_MARISTA_B64}" alt="Colégio Marista São José-Montes Claros">
     <img src="${LOGO_NAC_B64}" alt="NAC — Núcleo de Atividades Complementares">
   </div>`;
-  document.getElementById('painelModalContent').innerHTML = printHeader + `<h2 style="color:var(--navy); margin-top:0;">${escPdf(STATE.eventName)} — Classificação Geral</h2>` + classificacaoHtml();
+  document.getElementById('painelModalContent').innerHTML = printHeader + `<h2 style="color:var(--navy); margin-top:0;">${escPdf(STATE.eventName)} — Classificação Geral</h2>` + classificacaoHtml() + classificacaoPorAglutinadorHtml();
   document.querySelectorAll('#painelModalContent .btnExportarClassificacaoCsv').forEach(b=> b.addEventListener('click', exportarClassificacaoCsv));
   document.getElementById('painelModal').classList.add('open');
 }
