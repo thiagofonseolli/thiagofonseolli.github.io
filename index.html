@@ -9697,6 +9697,26 @@ function renderRegrasPontuacaoContentHtml(){
     <div class="row" style="margin-bottom:0;">
       <div class="field" style="flex:1; min-width:260px;"><label class="f-label">Modalidades Individuais — pontos por colocação (1º ao 12º, separados por vírgula)</label><input type="text" id="rgInd" value="${R.individual.join(',')}" ${adminDisabled()} style="width:100%;"></div>
     </div>
+    <h2 style="margin-top:18px;">Desfile</h2>
+    <p class="hint">Alimenta de verdade o formulário de votação dos jurados (aba Edital → Desfile) -- as opções de "Participação" e os tetos de Organização/Performance/Postura vêm destes valores, não de números fixos no código.</p>
+    <div class="row" style="margin-bottom:10px;">
+      <div class="field"><label class="f-label">Participação — até 30% (pts)</label><input type="number" id="rgDfPart30" value="${R.desfile.participacao30}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Participação — até 60% (pts)</label><input type="number" id="rgDfPart60" value="${R.desfile.participacao60}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Participação — a partir de 80% (pts)</label><input type="number" id="rgDfPart80" value="${R.desfile.participacao80}" ${adminDisabled()} style="width:100px;"></div>
+    </div>
+    <div class="row" style="margin-bottom:0;">
+      <div class="field"><label class="f-label">Organização — teto (pts)</label><input type="number" id="rgDfOrg" value="${R.desfile.organizacaoMax}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Performance — teto (pts)</label><input type="number" id="rgDfPerf" value="${R.desfile.performanceMax}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Postura — teto (pts)</label><input type="number" id="rgDfPost" value="${R.desfile.posturaMax}" ${adminDisabled()} style="width:100px;"></div>
+    </div>
+    <h2 style="margin-top:18px;">Penalidades do Desfile</h2>
+    <p class="hint">Valores usados como sugestão automática ao aplicar uma penalidade em "Ajustes" (aba Edital → Ajustes) -- escolher o tipo lá já preenche o desconto certo, sem precisar lembrar o valor de cabeça.</p>
+    <div class="row" style="margin-bottom:0;">
+      <div class="field"><label class="f-label">Leve (pts a descontar)</label><input type="number" id="rgPenLeve" value="${R.penalidades.leve}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Moderada (pts a descontar)</label><input type="number" id="rgPenModerada" value="${R.penalidades.moderada}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Grave (pts a descontar)</label><input type="number" id="rgPenGrave" value="${R.penalidades.grave}" ${adminDisabled()} style="width:100px;"></div>
+      <div class="field"><label class="f-label">Instrumento sonoro não autorizado (pts a descontar)</label><input type="number" id="rgPenInstrumento" value="${R.penalidades.instrumentoSonoro}" ${adminDisabled()} style="width:100px;"></div>
+    </div>
   </div>`;
 }
 function bindRegrasPontuacaoEvents(){
@@ -9732,6 +9752,16 @@ function bindRegrasPontuacaoEvents(){
   bindNum('rgFpD', v=>{ STATE.regras.fairPlay.D = v; });
   bindNum('rgFpE', v=>{ STATE.regras.fairPlay.E = v; });
   bindList('rgInd', v=>{ STATE.regras.individual = v; }, 12);
+  bindNum('rgDfPart30', v=>{ STATE.regras.desfile.participacao30 = v; });
+  bindNum('rgDfPart60', v=>{ STATE.regras.desfile.participacao60 = v; });
+  bindNum('rgDfPart80', v=>{ STATE.regras.desfile.participacao80 = v; });
+  bindNum('rgDfOrg', v=>{ STATE.regras.desfile.organizacaoMax = v; });
+  bindNum('rgDfPerf', v=>{ STATE.regras.desfile.performanceMax = v; });
+  bindNum('rgDfPost', v=>{ STATE.regras.desfile.posturaMax = v; });
+  bindNum('rgPenLeve', v=>{ STATE.regras.penalidades.leve = v; });
+  bindNum('rgPenModerada', v=>{ STATE.regras.penalidades.moderada = v; });
+  bindNum('rgPenGrave', v=>{ STATE.regras.penalidades.grave = v; });
+  bindNum('rgPenInstrumento', v=>{ STATE.regras.penalidades.instrumentoSonoro = v; });
 }
 
 /* ----- Regulamento (texto integral do edital) ----- */
@@ -10072,8 +10102,10 @@ function renderDesfileVotosWrap(){
   // critérios restantes valendo zero, derrubando a média de uma Equipe temporariamente
   // enquanto alguém ainda está avaliando — visível pra quem estiver olhando o
   // "Resultado" ao vivo nesse meio-tempo.
+  const D = STATE.regras.desfile;
+  const opcoesParticipacao = [0, D.participacao30, D.participacao60, D.participacao80];
   wrap.innerHTML = `<p class="hint">Preencha os 4 critérios de cada Equipe e clique em "Salvar" — só entra na média depois de salvo.</p>
-    <table><thead><tr><th>equipe</th><th>Participação (0/10/20/30)</th><th>Organização (0–10)</th><th>Performance (0–10)</th><th>Postura (0–10)</th><th>Prévia</th><th></th></tr></thead><tbody id="desfileVotosBody"></tbody></table>`;
+    <table><thead><tr><th>equipe</th><th>Participação (${opcoesParticipacao.join('/')})</th><th>Organização (0–${D.organizacaoMax})</th><th>Performance (0–${D.performanceMax})</th><th>Postura (0–${D.posturaMax})</th><th>Prévia</th><th></th></tr></thead><tbody id="desfileVotosBody"></tbody></table>`;
   const body = document.getElementById('desfileVotosBody');
   body.innerHTML = STATE.teams.map(t=>{
     const chave = t.id+'|'+jurado.id;
@@ -10081,10 +10113,10 @@ function renderDesfileVotosWrap(){
     const v = STATE.desfileVotos[chave] || {participacao:0, organizacao:0, performance:0, postura:0};
     const total = (v.participacao||0)+(v.organizacao||0)+(v.performance||0)+(v.postura||0);
     return `<tr data-team="${t.id}"><td>${teamChip(t.id, null)}</td>
-      <td><select class="vParticipacao" ${adminDisabled()}>${[0,10,20,30].map(n=>`<option value="${n}" ${v.participacao===n?'selected':''}>${n}</option>`).join('')}</select></td>
-      <td><input type="number" class="vOrganizacao" min="0" max="10" value="${v.organizacao||0}" ${adminDisabled()}></td>
-      <td><input type="number" class="vPerformance" min="0" max="10" value="${v.performance||0}" ${adminDisabled()}></td>
-      <td><input type="number" class="vPostura" min="0" max="10" value="${v.postura||0}" ${adminDisabled()}></td>
+      <td><select class="vParticipacao" ${adminDisabled()}>${opcoesParticipacao.map(n=>`<option value="${n}" ${v.participacao===n?'selected':''}>${n}</option>`).join('')}</select></td>
+      <td><input type="number" class="vOrganizacao" min="0" max="${D.organizacaoMax}" value="${v.organizacao||0}" ${adminDisabled()}></td>
+      <td><input type="number" class="vPerformance" min="0" max="${D.performanceMax}" value="${v.performance||0}" ${adminDisabled()}></td>
+      <td><input type="number" class="vPostura" min="0" max="${D.posturaMax}" value="${v.postura||0}" ${adminDisabled()}></td>
       <td class="mono totalCell">${total}</td>
       <td>${isAdmin?`<button class="btn secondary small salvarVotoLinha" data-team="${t.id}">💾 ${jaSalvo?'Atualizar':'Salvar'}</button> <span class="hint statusVoto" style="margin:0;">${jaSalvo?'✅ salvo':'não salvo ainda'}</span>`:''}</td></tr>`;
   }).join('');
@@ -10095,9 +10127,9 @@ function renderDesfileVotosWrap(){
     // ajuda a conferir a soma antes de salvar, sem contar na média ainda.
     const atualizarPreviaESalvo = ()=>{
       const p = Number(tr.querySelector('.vParticipacao').value)||0;
-      const o = Math.max(0,Math.min(10,Number(tr.querySelector('.vOrganizacao').value)||0));
-      const pf = Math.max(0,Math.min(10,Number(tr.querySelector('.vPerformance').value)||0));
-      const ps = Math.max(0,Math.min(10,Number(tr.querySelector('.vPostura').value)||0));
+      const o = Math.max(0,Math.min(D.organizacaoMax,Number(tr.querySelector('.vOrganizacao').value)||0));
+      const pf = Math.max(0,Math.min(D.performanceMax,Number(tr.querySelector('.vPerformance').value)||0));
+      const ps = Math.max(0,Math.min(D.posturaMax,Number(tr.querySelector('.vPostura').value)||0));
       tr.querySelector('.totalCell').textContent = p+o+pf+ps;
       const statusEl = tr.querySelector('.statusVoto');
       if(statusEl) statusEl.textContent = 'alterado, não salvo';
@@ -10107,9 +10139,9 @@ function renderDesfileVotosWrap(){
     if(salvarBtn) salvarBtn.addEventListener('click', ()=>{
       const v = {
         participacao: Number(tr.querySelector('.vParticipacao').value)||0,
-        organizacao: Math.max(0,Math.min(10,Number(tr.querySelector('.vOrganizacao').value)||0)),
-        performance: Math.max(0,Math.min(10,Number(tr.querySelector('.vPerformance').value)||0)),
-        postura: Math.max(0,Math.min(10,Number(tr.querySelector('.vPostura').value)||0)),
+        organizacao: Math.max(0,Math.min(D.organizacaoMax,Number(tr.querySelector('.vOrganizacao').value)||0)),
+        performance: Math.max(0,Math.min(D.performanceMax,Number(tr.querySelector('.vPerformance').value)||0)),
+        postura: Math.max(0,Math.min(D.posturaMax,Number(tr.querySelector('.vPostura').value)||0)),
       };
       STATE.desfileVotos[chave] = v;
       recomputarDesfileMedia(teamId);
@@ -10174,10 +10206,18 @@ function renderDesfileBody(){
 
 /* ----- Ajustes e Penalidades ----- */
 function renderAjustesContentHtml(){
+  const P = STATE.regras.penalidades;
   return (isAdmin ? `<div class="card"><h2>Ajustes e Penalidades</h2>
-    <p class="hint">Lance acréscimos ou descontos manuais — ex.: instrumentos sonoros (−50 pts), infração leve/moderada/grave (−5/−10/−15 pts), decisões da Comissão Disciplinar, etc.</p>
+    <p class="hint">Lance acréscimos ou descontos manuais — escolha um tipo de penalidade abaixo pra já preencher o desconto certo (configurável em "Regras e Pontuação"), ou "Personalizada" pra digitar um valor livre.</p>
     <div class="row">
       <div class="field"><label class="f-label">equipe</label><select id="ajTeam">${STATE.teams.map(t=>`<option value="${t.id}" style="${teamOptionStyle(t.id, null)}">${escPdf(t.label)}</option>`).join('')}</select></div>
+      <div class="field"><label class="f-label">Tipo de penalidade</label><select id="ajTipoPenalidade">
+        <option value="">Personalizada (digitar valor livre)</option>
+        <option value="leve">Leve (−${P.leve} pts)</option>
+        <option value="moderada">Moderada (−${P.moderada} pts)</option>
+        <option value="grave">Grave (−${P.grave} pts)</option>
+        <option value="instrumentoSonoro">Instrumento sonoro não autorizado (−${P.instrumentoSonoro} pts)</option>
+      </select></div>
       <div class="field"><label class="f-label">Motivo</label><input type="text" id="ajMotivo" placeholder="Ex.: uso de corneta na torcida" style="width:260px;"></div>
       <div class="field"><label class="f-label">Pontos (+/-)</label><input type="number" id="ajPontos" value="-5" style="width:90px;"></div>
       <div class="field"><label class="f-label">&nbsp;</label><button class="btn" id="ajAdd">Adicionar</button></div>
@@ -10185,6 +10225,26 @@ function renderAjustesContentHtml(){
   + `<div class="card"><table><thead><tr><th>equipe</th><th>Motivo</th><th>Pontos</th><th></th></tr></thead><tbody id="ajBody"></tbody></table></div>`;
 }
 function bindAjustesEvents(){
+  // Escolher um tipo pré-definido já preenche Pontos (e sugere um Motivo, se o campo
+  // ainda estiver vazio) com o valor configurado em "Regras e Pontuação" -- não trava
+  // nada, o admin continua podendo editar os dois campos livremente antes de
+  // adicionar. "Personalizada" (a opção padrão) mantém o comportamento de sempre,
+  // digitar tudo na mão.
+  const tipoSelect = document.getElementById('ajTipoPenalidade');
+  if(tipoSelect) tipoSelect.addEventListener('change', ()=>{
+    const P = STATE.regras.penalidades;
+    const mapa = {
+      leve: {valor: P.leve, motivo: 'Penalidade leve'},
+      moderada: {valor: P.moderada, motivo: 'Penalidade moderada'},
+      grave: {valor: P.grave, motivo: 'Penalidade grave'},
+      instrumentoSonoro: {valor: P.instrumentoSonoro, motivo: 'Uso de instrumento sonoro não autorizado'},
+    };
+    const escolha = mapa[tipoSelect.value];
+    if(!escolha) return;
+    document.getElementById('ajPontos').value = -Math.abs(escolha.valor);
+    const motivoInput = document.getElementById('ajMotivo');
+    if(!motivoInput.value.trim()) motivoInput.value = escolha.motivo;
+  });
   const ajAddBtn = document.getElementById('ajAdd');
   if(ajAddBtn) ajAddBtn.addEventListener('click', ()=>{
     const teamId = document.getElementById('ajTeam').value;
@@ -10193,6 +10253,7 @@ function bindAjustesEvents(){
     if(!STATE.ajustes[teamId]) STATE.ajustes[teamId]=[];
     STATE.ajustes[teamId].push({motivo, pontos});
     document.getElementById('ajMotivo').value='';
+    if(tipoSelect) tipoSelect.value='';
     markDirty(); renderAjustesBody(); renderScoreboard();
   });
 }
