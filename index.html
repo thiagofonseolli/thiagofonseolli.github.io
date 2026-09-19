@@ -201,6 +201,9 @@
   .edital-topic-editing{background:#FFFBEA;}
   .edital-topic-editing > summary{background:#FFF3C4;}
   .edital-content mark{background:#FFEB3B; color:inherit; padding:0 1px; border-radius:2px;}
+  .edital-content mark.buscaAtual{background:var(--gold,#FFA500); box-shadow:0 0 0 2px var(--navy,#1F2937) inset;}
+  .busca-nav-btn{padding:2px 9px; font-size:13px; min-width:0;}
+  .busca-contador{font-size:12.5px; color:var(--muted); white-space:nowrap;}
 
   @media print{
     .topbar, .toolbar, .foot-note{display:none !important;}
@@ -1313,6 +1316,8 @@ function rebuildEditalHtml(preambuloHtml, topics){
 }
 
 let editalTopicSearchQuery = ''; // texto atual digitado na busca do Regulamento
+let editalBuscaMarcas = []; // <mark> encontrados pela busca atual, na ordem em que aparecem no documento -- ver destacarBuscaNoElemento()
+let editalBuscaIndiceAtual = -1; // qual das marcas acima está "selecionada" no momento (navegação anterior/próximo)
 
 /* Remove acentuação e caixa para permitir busca tolerante (ex.: "licoes" encontra "lições"). */
 function normalizeSearchText(s){
@@ -1336,15 +1341,18 @@ function construirRegexDestaque(query){
    amarelo, ver CSS .edital-content mark). Só mexe em NÓS DE TEXTO (via TreeWalker),
    nunca na estrutura de tags em si -- não tem como isso corromper HTML ou destacar algo
    dentro do nome de uma tag por engano, mesmo que o termo buscado coincida com uma
-   palavra usada em algum atributo interno. */
+   palavra usada em algum atributo interno. Retorna a lista de <mark> criados, na ordem
+   em que aparecem no documento -- usada por irParaOcorrenciaBusca() pra saber quantas
+   ocorrências existem e pra onde pular. */
 function destacarBuscaNoElemento(container, query){
-  if(!container) return;
+  if(!container) return [];
   const regex = construirRegexDestaque(query);
-  if(!regex) return;
+  if(!regex) return [];
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
   const nos = [];
   let no;
   while((no = walker.nextNode())) nos.push(no);
+  const marcasCriadas = [];
   nos.forEach(textNode=>{
     const texto = textNode.textContent;
     regex.lastIndex = 0;
@@ -1357,12 +1365,58 @@ function destacarBuscaNoElemento(container, query){
       const mark = document.createElement('mark');
       mark.textContent = m[0];
       frag.appendChild(mark);
+      marcasCriadas.push(mark);
       lastIndex = m.index + m[0].length;
       if(m[0].length===0) regex.lastIndex++; // guarda contra loop infinito num casamento vazio
     }
     if(lastIndex < texto.length) frag.appendChild(document.createTextNode(texto.slice(lastIndex)));
     textNode.parentNode.replaceChild(frag, textNode);
   });
+  return marcasCriadas;
+}
+/* Navegação entre ocorrências da busca do Regulamento -- "pular direto pra próxima/
+   anterior palavra destacada" e o contador "X de Y", pedidos explicitamente. Chamada
+   sempre que a busca muda (nova lista de <mark>) ou quando a pessoa clica em
+   "◀"/"▶"/aperta Enter no campo de busca. Sempre que possível, seleciona a primeira
+   ocorrência automaticamente ao digitar, do mesmo jeito que o Ctrl+F do navegador já
+   faz -- ninguém precisa clicar em "próximo" só pra ver o primeiro resultado. */
+function atualizarMarcasBuscaRegulamento(marcas){
+  editalBuscaMarcas = marcas || [];
+  editalBuscaIndiceAtual = editalBuscaMarcas.length>0 ? 0 : -1;
+  aplicarMarcaAtualBusca(true);
+  renderizarContadorBuscaRegulamento();
+}
+function aplicarMarcaAtualBusca(rolarAteEla){
+  editalBuscaMarcas.forEach(m=> m.classList.remove('buscaAtual'));
+  if(editalBuscaIndiceAtual<0 || editalBuscaIndiceAtual>=editalBuscaMarcas.length) return;
+  const marcaAtual = editalBuscaMarcas[editalBuscaIndiceAtual];
+  marcaAtual.classList.add('buscaAtual');
+  if(rolarAteEla) marcaAtual.scrollIntoView({behavior:'smooth', block:'center'});
+}
+function irParaOcorrenciaBuscaRegulamento(delta){
+  if(editalBuscaMarcas.length===0) return;
+  // Dá a volta nas duas pontas (do último pro primeiro e vice-versa) -- mesmo
+  // comportamento do "próximo"/"anterior" do Ctrl+F de qualquer navegador.
+  editalBuscaIndiceAtual = (editalBuscaIndiceAtual + delta + editalBuscaMarcas.length) % editalBuscaMarcas.length;
+  aplicarMarcaAtualBusca(true);
+  renderizarContadorBuscaRegulamento();
+}
+function renderizarContadorBuscaRegulamento(){
+  const contador = document.getElementById('editalBuscaContador');
+  const btnAnterior = document.getElementById('editalBuscaAnteriorBtn');
+  const btnProximo = document.getElementById('editalBuscaProximoBtn');
+  if(!contador) return;
+  const total = editalBuscaMarcas.length;
+  if(!editalTopicSearchQuery.trim()){
+    contador.textContent = '';
+  } else if(total===0){
+    contador.textContent = 'Nenhuma ocorrência';
+  } else {
+    contador.textContent = `${editalBuscaIndiceAtual+1} de ${total} ocorrência${total===1?'':'s'}`;
+  }
+  const habilitado = total>1; // com 0 ou 1 ocorrência, não faz sentido "navegar"
+  if(btnAnterior) btnAnterior.disabled = !habilitado;
+  if(btnProximo) btnProximo.disabled = !habilitado;
 }
 /* Atrasa a execução de `fn` até `ms` ms sem uma nova chamada -- usado nos campos de
    busca que reconstroem uma lista grande (ex.: Inscritos, que já foi testado com até
@@ -9816,7 +9870,12 @@ function renderRegulamentoIntegraContentHtml(){
     <p class="hint">Documento original anexado, convertido para leitura aqui no painel. Os números de pontuação exibidos abaixo refletem a seção "Regras e Pontuação" desta aba.${isAdmin ? ' Use o botão "✏️ Editar regulamento" abaixo para reescrever o documento inteiro de uma vez.' : ''}</p>
     <div class="field" style="margin:10px 0 12px;">
       <label class="f-label">🔎 Buscar no regulamento</label>
-      <input type="text" id="editalTopicSearchInput" value="${escPdf(editalTopicSearchQuery)}" placeholder="Ex.: jogo limpo, xadrez, penalidade, uniforme..." style="width:100%;">
+      <div class="row" style="align-items:center; gap:8px;">
+        <input type="text" id="editalTopicSearchInput" value="${escPdf(editalTopicSearchQuery)}" placeholder="Ex.: jogo limpo, xadrez, penalidade, uniforme..." style="flex:1; min-width:200px;">
+        <button class="btn secondary busca-nav-btn" id="editalBuscaAnteriorBtn" title="Ocorrência anterior" disabled>◀</button>
+        <button class="btn secondary busca-nav-btn" id="editalBuscaProximoBtn" title="Próxima ocorrência" disabled>▶</button>
+        <span class="busca-contador" id="editalBuscaContador"></span>
+      </div>
     </div>
     <div class="row" style="margin:12px 0;">
       <button class="btn secondary small" id="btnVisualizarEdital">👁️ Visualizar edital completo</button>
@@ -9831,7 +9890,8 @@ function renderRegulamentoIntegraContentHtml(){
 function refreshEditalRegulamentoBody(){
   const body = document.getElementById('editalRegulamentoBody');
   if(body) body.innerHTML = `<div class="edital-content">${renderEditalAccordion(STATE.editalHtml)}</div>`;
-  destacarBuscaNoElemento(body, editalTopicSearchQuery);
+  const marcas = destacarBuscaNoElemento(body, editalTopicSearchQuery);
+  atualizarMarcasBuscaRegulamento(marcas);
 }
 function bindRegulamentoIntegraEvents(){
   const btnVer = document.getElementById('btnVisualizarEdital');
@@ -9841,11 +9901,23 @@ function bindRegulamentoIntegraEvents(){
   const btnEditar = document.getElementById('btnEditarRegulamento');
   if(btnEditar) btnEditar.addEventListener('click', abrirEditarRegulamentoModal);
   const searchInput = document.getElementById('editalTopicSearchInput');
-  if(searchInput) searchInput.addEventListener('input', debounce((e)=>{
-    editalTopicSearchQuery = e.target.value;
-    refreshEditalRegulamentoBody();
-  }, 200));
-  destacarBuscaNoElemento(document.getElementById('editalRegulamentoBody'), editalTopicSearchQuery); // cobre o caso de reabrir a aba com uma busca já digitada antes
+  if(searchInput){
+    searchInput.addEventListener('input', debounce((e)=>{
+      editalTopicSearchQuery = e.target.value;
+      refreshEditalRegulamentoBody();
+    }, 200));
+    // Enter no campo de busca pula direto pra próxima ocorrência -- mesmo atalho que o
+    // Ctrl+F de qualquer navegador já usa, sem precisar tirar a mão do teclado.
+    searchInput.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); irParaOcorrenciaBuscaRegulamento(e.shiftKey ? -1 : 1); }
+    });
+  }
+  const btnAnterior = document.getElementById('editalBuscaAnteriorBtn');
+  if(btnAnterior) btnAnterior.addEventListener('click', ()=> irParaOcorrenciaBuscaRegulamento(-1));
+  const btnProximo = document.getElementById('editalBuscaProximoBtn');
+  if(btnProximo) btnProximo.addEventListener('click', ()=> irParaOcorrenciaBuscaRegulamento(1));
+  const marcas = destacarBuscaNoElemento(document.getElementById('editalRegulamentoBody'), editalTopicSearchQuery); // cobre o caso de reabrir a aba com uma busca já digitada antes
+  atualizarMarcasBuscaRegulamento(marcas);
 }
 
 /* ----- Editar o regulamento inteiro de uma vez (um único campo de texto) -----
