@@ -118,6 +118,7 @@
      no SVG por baixo dele em vez de borbulhar pro botão -- bug real relatado. */
   .jogador-circulo-svg{width:100%; height:100%; display:block; pointer-events:none;}
   .jogador-circulo-borda{fill:#fff; stroke:var(--navy); stroke-width:2.5;}
+  .jogador-circulo-borda.jogador-circulo-presente{stroke:var(--green,#2E7D32); stroke-width:3.5;}
   .jogador-circulo:not(:disabled):hover .jogador-circulo-borda, .jogador-circulo:not(:disabled):focus-visible .jogador-circulo-borda{stroke:var(--gold); fill:#FFFBEA;}
   .jogador-circulo-nome{font-family:'Inter',sans-serif; font-weight:600; fill:var(--text); letter-spacing:0.01em;} /* font-size vem inline por jogador, ver rosterHtml() */
   .jogador-circulo-numero-svg{font-family:'Oswald',sans-serif; font-weight:700; font-size:42px; fill:var(--navy);}
@@ -2519,7 +2520,7 @@ const SYNC_COLECOES = {
 };
 // Nomes de tabela que não são uma lista simples (formatos especiais, tratados à parte
 // em syncListarIdsAtuais / syncConstruirLinha / syncAplicarLinha).
-const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','inscrito_foto','config','imagensPendentesUpload'];
+const SYNC_TABELAS_ESPECIAIS = ['modalidades','individual','desfile','desfileVotos','ajustes','sumula_obs','sumula_evento','sumula_presenca','inscrito_foto','config','imagensPendentesUpload'];
 const SYNC_TABELAS_DIFF = [...Object.keys(SYNC_COLECOES), ...SYNC_TABELAS_ESPECIAIS];
 const SYNC_CONFIG_CHAVES = ['eventName','headerTexto','headerLogoRef','headerBgRef','crachaLogo1Ref','crachaLogo2Ref','sumulaTipos','sumulaTiposHistorico','regras','tabOrder','crachaConfig','editalHtml','avisoPrivacidadeHtml','adminAuth','adminTotp','codigoAcessoCifraSalt'];
 
@@ -2543,6 +2544,15 @@ function syncListarIdsAtuais(tabela){
   // Um lançamento de súmula (gol, cartão etc.) vive dentro de STATE.sumulas[gameId].eventos
   // -- pra listar TODOS os IDs atuais (de qualquer jogo), precisa achatar essa estrutura.
   if(tabela==='sumula_evento') return Object.values(STATE.sumulas).flatMap(s=> (s.eventos||[]).map(e=> String(e.id)));
+  // Mesmo raciocínio de sumula_evento -- cada confirmação de presença é uma unidade
+  // independente, sincronizada como sua própria linha (nunca um array compartilhado por
+  // jogo), de propósito: mais de uma pessoa pode estar confirmando presença de alunos
+  // DIFERENTES no mesmo jogo ao mesmo tempo (comum enquanto os times chegam), e um
+  // array compartilhado sincronizado como um bloco só sofreria exatamente o mesmo tipo
+  // de sobrescrita cruzada já identificado e corrigido antes na verificação em duas
+  // etapas (ver adminAuth/adminTotp) -- aqui, cada confirmação some/aparece sozinha,
+  // sem nenhum risco de uma apagar a outra.
+  if(tabela==='sumula_presenca') return Object.values(STATE.sumulas).flatMap(s=> (s.presencas||[]).map(p=> String(p.id)));
   if(tabela==='inscrito_foto') return STATE.inscritos.map(a=>String(a.id));
   if(tabela==='config') return SYNC_CONFIG_CHAVES;
   if(tabela==='imagensPendentesUpload') return Object.keys(STATE.imagensPendentesUpload);
@@ -2580,6 +2590,14 @@ function syncConstruirLinha(tabela, registroId){
     for(const gid of Object.keys(STATE.sumulas)){
       const ev = (STATE.sumulas[gid].eventos||[]).find(e=> String(e.id)===String(registroId));
       if(ev){ encontrado = ev; gameIdEncontrado = gid; break; }
+    }
+    return {...base, dados: encontrado ? {...encontrado, gameId: Number(gameIdEncontrado)} : null, deletado: !encontrado};
+  }
+  if(tabela==='sumula_presenca'){
+    let encontrado = null, gameIdEncontrado = null;
+    for(const gid of Object.keys(STATE.sumulas)){
+      const p = (STATE.sumulas[gid].presencas||[]).find(x=> String(x.id)===String(registroId));
+      if(p){ encontrado = p; gameIdEncontrado = gid; break; }
     }
     return {...base, dados: encontrado ? {...encontrado, gameId: Number(gameIdEncontrado)} : null, deletado: !encontrado};
   }
@@ -2702,6 +2720,7 @@ function syncAplicarLinha(linha){
     return;
   }
   if(tabela==='sumula_evento'){ if(syncTemEdicaoLocalPendente('sumula_evento', registro_id)) return; syncAplicarEvento(linha); return; }
+  if(tabela==='sumula_presenca'){ if(syncTemEdicaoLocalPendente('sumula_presenca', registro_id)) return; syncAplicarPresenca(linha); return; }
   if(tabela==='inscrito_foto'){
     if(syncTemEdicaoLocalPendente('inscrito_foto', registro_id)) return;
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
@@ -2778,6 +2797,25 @@ function syncAplicarEvento(linha){
   }
   const game = STATE.games.find(g=>g.id===gameId);
   if(game) recomputarPlacarSumula(game);
+}
+/* Mesmo padrão de syncAplicarEvento(), pra confirmação de presença -- cada confirmação
+   é sua própria linha (id único, ver nextPresencaId()), nunca um array reescrito por
+   inteiro; aplicar uma confirmação vinda de outro dispositivo nunca apaga nenhuma
+   OUTRA confirmação já existente aqui, mesmo que tenham sido feitas quase ao mesmo
+   tempo em jogos/alunos diferentes. */
+function syncAplicarPresenca(linha){
+  const dados = linha.dados;
+  if(!dados || dados.gameId==null) return;
+  const gameId = dados.gameId;
+  if(!STATE.sumulas[gameId]) STATE.sumulas[gameId] = {eventos:[], observacoes:'', presencas:[]};
+  if(!Array.isArray(STATE.sumulas[gameId].presencas)) STATE.sumulas[gameId].presencas = [];
+  const presencas = STATE.sumulas[gameId].presencas;
+  const idx = presencas.findIndex(p=>p.id===dados.id);
+  if(linha.deletado){ if(idx>=0) presencas.splice(idx,1); }
+  else{
+    const presencaLimpa = {id:dados.id, studentId:dados.studentId, ts:dados.ts};
+    if(idx>=0) presencas[idx] = presencaLimpa; else presencas.push(presencaLimpa);
+  }
 }
 
 /* ===================== DETECÇÃO DE MUDANÇAS (para tudo, exceto eventos de súmula) =====================
@@ -2908,6 +2946,7 @@ async function syncPuxarNovidades(){
     if(linha.atualizado_em > maiorTimestamp) maiorTimestamp = linha.atualizado_em;
     if(linha.dispositivo === syncDeviceId) return; // não precisa reaplicar o que este dispositivo mandou
     if(linha.tabela==='sumula_evento') syncAplicarEvento(linha);
+    else if(linha.tabela==='sumula_presenca') syncAplicarPresenca(linha);
     else syncAplicarLinha(linha);
     aplicadas++;
   });
@@ -8518,6 +8557,70 @@ function registrarAlimentacaoComValor(valorDigitado, origemInputId){
   finalizarRegistroAlimentacao(inscrito, origemInputId);
   return true;
 }
+/* ----- Confirmação de Presença (escalação da súmula) ----- */
+/* Mesma lógica de identificação já usada no check-in de Alimentação e nos formulários
+   "buscáveis" (findInscritoPorCodigoOuNome -- código exato, nome exato, ou nome parcial
+   sem ambiguidade) e o mesmo modal de câmera (openQrScanModal), reaproveitados aqui
+   como pedido explicitamente ("A mesma função de identificação de inscritos via
+   leitura de QR CODE"). Confirma (ou remove, se já confirmado -- reescanear o mesmo
+   crachá por engano não deveria travar nem duplicar nada em silêncio) a presença de um
+   inscrito neste jogo específico; exige que ele esteja de fato escalado neste jogo
+   (nesta modalidade/gênero, para uma das duas Equipes) -- confirmar a presença de
+   alguém que nem deveria estar jogando essa partida não faz sentido. Retorna true/false
+   no mesmo padrão de registrarAlimentacaoComValor(), pra funcionar tanto digitando e
+   apertando Enter quanto escaneando pela câmera (ver tickQrScan). */
+function registrarPresencaComValor(gameId, valorDigitado, origemInputId){
+  const game = STATE.games.find(g=>g.id===gameId);
+  if(!game || game.wo) return false;
+  const result = findInscritoPorCodigoOuNome(valorDigitado);
+  if(result.status==='empty'){ showAlert('Digite ou escaneie o código do inscrito.'); return false; }
+  if(result.status==='notfound'){ showAlert('Inscrito não encontrado. Confira o nome ou o código.'); return false; }
+  if(result.status==='ambiguous'){
+    showAlert('Mais de um inscrito encontrado com esse nome. Use o código do inscrito para identificar com precisão:\n\n' +
+      result.matches.map(a=>`${a.nome} — ${teamLabel(a.teamId)} — código: ${a.codigo}`).join('\n'));
+    return false;
+  }
+  const inscrito = result.inscrito;
+  const inscritosA = inscritosDaSumula(game,'A');
+  const inscritosB = inscritosDaSumula(game,'B');
+  const pertenceAoJogo = inscritosA.some(a=>a.id===inscrito.id) || inscritosB.some(a=>a.id===inscrito.id);
+  if(!pertenceAoJogo){
+    showAlert(`${inscrito.nome} não está escalado(a) neste jogo (nesta modalidade e gênero, em nenhuma das duas Equipes).`);
+    return false;
+  }
+  const sumula = getSumula(gameId);
+  if(origemInputId){ const el = document.getElementById(origemInputId); if(el) el.value=''; }
+  const presencaExistente = sumula.presencas.find(p=>p.studentId===inscrito.id);
+  if(presencaExistente){
+    showConfirm(`${inscrito.nome} já está com presença confirmada neste jogo. Remover a confirmação?`, ()=>{
+      sumula.presencas = sumula.presencas.filter(p=>p.id!==presencaExistente.id);
+      markDirty();
+      // syncMarcarPendente garante reenvio no próximo ciclo mesmo se o envio imediato
+      // abaixo falhar (rede instável no exato momento do clique) -- mesmo mecanismo já
+      // usado pros lançamentos de súmula (sumula_evento).
+      syncMarcarPendente('sumula_presenca', presencaExistente.id);
+      syncEnviarDelecaoImediata('sumula_presenca', presencaExistente.id, {...presencaExistente, gameId});
+      atualizarPainelJogoSeExpandido(gameId);
+    });
+  } else {
+    const novaPresenca = {id: nextPresencaId(), studentId: inscrito.id, ts: Date.now()};
+    sumula.presencas.push(novaPresenca);
+    markDirty();
+    syncMarcarPendente('sumula_presenca', novaPresenca.id);
+    syncEnviarLote([{id:`sumula_presenca:${novaPresenca.id}`, tabela:'sumula_presenca', registro_id:String(novaPresenca.id), dados:{...novaPresenca, gameId}, deletado:false, atualizado_em:new Date().toISOString(), dispositivo:syncDeviceId}]).catch(()=>{});
+    atualizarPainelJogoSeExpandido(gameId);
+  }
+  return true;
+}
+/* Re-renderiza o painel de detalhes de um jogo, só se ele estiver de fato expandido no
+   momento -- mesmo padrão já usado em registrarLancamentoJogador() (o outro caso que
+   precisa atualizar a escalação por baixo de um popup/modal separado). */
+function atualizarPainelJogoSeExpandido(gameId){
+  if(expandedGameId!==gameId) return;
+  const card = document.querySelector(`.game-row[data-id="${gameId}"]`);
+  const panel = card ? card.querySelector('.game-row-panel') : null;
+  if(panel){ panel.innerHTML = buildGameDetailHtml(gameId); wireGameDetailPanelEvents(gameId, panel); }
+}
 function finalizarRegistroAlimentacao(inscrito, origemInputId){
   const ts = Date.now();
   const novoCheckin = {id:nextCheckinId(), studentId:inscrito.id, ts};
@@ -8859,6 +8962,7 @@ function getSumula(gameId){
   if(!STATE.sumulas[gameId]) STATE.sumulas[gameId] = {eventos:[]};
   if(!Array.isArray(STATE.sumulas[gameId].eventos)) STATE.sumulas[gameId].eventos = [];
   if(typeof STATE.sumulas[gameId].observacoes !== 'string') STATE.sumulas[gameId].observacoes = '';
+  if(!Array.isArray(STATE.sumulas[gameId].presencas)) STATE.sumulas[gameId].presencas = []; // [{id, studentId, ts}] -- ver "Confirmação de Presença" e nextPresencaId()
   return STATE.sumulas[gameId];
 }
 /* Sequencial simples colidiria entre dispositivos lançando um evento de súmula quase ao
@@ -8871,6 +8975,13 @@ function getSumula(gameId){
 function nextEventoId(){
   let max=0;
   Object.values(STATE.sumulas).forEach(s=> (s.eventos||[]).forEach(e=> { if(e.id>max) max=e.id; }));
+  return max + 1 + Math.floor(Math.random()*1000000);
+}
+/* Mesmo raciocínio de nextEventoId() -- salto aleatório grande evita colisão entre
+   dispositivos confirmando presença quase ao mesmo tempo. */
+function nextPresencaId(){
+  let max=0;
+  Object.values(STATE.sumulas).forEach(s=> (s.presencas||[]).forEach(p=> { if(p.id>max) max=p.id; }));
   return max + 1 + Math.floor(Math.random()*1000000);
 }
 function sumulaTiposDaModalidade(modalidade){
@@ -9288,6 +9399,7 @@ function buildGameDetailHtml(gameId){
       const alergiaTag = (a.alergiaMedicamento && podeVerSaude) ? `<span title="Alergia(s) a medicamento: ${escPdf(a.alergias)}">🏥</span>` : '';
       const restricaoTag = (a.restricaoAlimentar && podeVerSaude) ? `<span title="Restrição(ões) alimentar(es): ${escPdf(a.restricoesAlimentares)}">🍽️</span>` : '';
       const totalLancamentos = sumula.eventos.filter(e=>e.studentId===a.id).length;
+      const presente = sumula.presencas.some(p=>p.studentId===a.id);
       const desabilitado = !isAdmin || game.wo;
       // Abre um popup pra escolher a variável (ver abrirLancamentoJogadorModal) --
       // substitui a fileira de botões que existia solta embaixo do nome de cada
@@ -9308,9 +9420,9 @@ function buildGameDetailHtml(gameId){
       // largura disponível dentro do círculo naquela altura.
       const larguraDisponivelNome = 84;
       const fonteNome = Math.max(6.5, Math.min(11.5, larguraDisponivelNome / (Math.max(a.nome.length,1) * 0.56)));
-      return `<button class="jogador-circulo" data-inscrito="${a.id}" data-side="${side}" ${desabilitado?'disabled':''} aria-label="Lançar ocorrência para ${escPdf(a.nome)}${a.numeroUniforme!=null?', número '+a.numeroUniforme:''}${totalLancamentos>0?`, ${totalLancamentos} lançamento(s) já registrado(s)`:''}">
+      return `<button class="jogador-circulo" data-inscrito="${a.id}" data-side="${side}" ${desabilitado?'disabled':''} aria-label="Lançar ocorrência para ${escPdf(a.nome)}${a.numeroUniforme!=null?', número '+a.numeroUniforme:''}${totalLancamentos>0?`, ${totalLancamentos} lançamento(s) já registrado(s)`:''}${presente?', presença confirmada':''}">
         <svg viewBox="0 0 120 120" class="jogador-circulo-svg" aria-hidden="true">
-          <circle cx="60" cy="60" r="56" class="jogador-circulo-borda"/>
+          <circle cx="60" cy="60" r="56" class="jogador-circulo-borda${presente?' jogador-circulo-presente':''}"/>
           <text x="60" y="62" text-anchor="middle" class="jogador-circulo-numero-svg">${a.numeroUniforme!=null?a.numeroUniforme:'?'}</text>
           <text x="60" y="80" text-anchor="middle" class="jogador-circulo-nome" style="font-size:${fonteNome.toFixed(1)}px;">${escPdf(a.nome)}</text>
         </svg>
@@ -9347,6 +9459,19 @@ function buildGameDetailHtml(gameId){
   <div class="card">
     <h2 style="font-size:15px;">Resumo dos Lançamentos</h2>
     <table><thead><tr><th>Ocorrência</th><th>${teamChip(game.teamA, game.genero)}</th><th>${teamChip(game.teamB, game.genero)}</th></tr></thead><tbody>${resumoHtml}</tbody></table>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:15px;">✅ Confirmação de Presença</h2>
+    <p class="hint">Digite o código do inscrito (ou parte do nome), ou escaneie o QR Code do crachá, para confirmar que ele se apresentou para este jogo. O contorno do círculo dele, na escalação abaixo, fica verde depois de confirmado. Escanear/digitar de novo alguém já confirmado pergunta se quer remover a confirmação.</p>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:1; min-width:220px;">
+        <label class="f-label">Código ou nome do inscrito</label>
+        <input type="text" class="sdPresencaBusca" list="sdPresencaDatalist-${game.id}" placeholder="Ex.: AB12CD, ou parte do nome" ${(!isAdmin||game.wo)?'disabled':''}>
+        ${inscritoBuscavelDatalistHtml(`sdPresencaDatalist-${game.id}`, [...inscritosA, ...inscritosB].sort((x,y)=> x.nome.localeCompare(y.nome,'pt-BR')))}
+      </div>
+      <button class="btn secondary sdPresencaScanBtn" ${(!isAdmin||game.wo)?'disabled':''}>📷 Escanear QR Code</button>
+    </div>
   </div>
 
   <div class="row" style="gap:16px; align-items:flex-start;">
@@ -9486,6 +9611,14 @@ function wireGameDetailPanelEvents(gameId, panelEl){
   const sdScoreAEl = panelEl.querySelector('.sdScoreA'), sdScoreBEl = panelEl.querySelector('.sdScoreB');
   const sdWoEl = panelEl.querySelector('.sdWoSelect'), sdFpAEl = panelEl.querySelector('.sdFpA'), sdFpBEl = panelEl.querySelector('.sdFpB');
   const sdDataEl = panelEl.querySelector('.sdDataInput'), sdHoraEl = panelEl.querySelector('.sdHoraInput'), sdLocalEl = panelEl.querySelector('.sdLocalInput');
+  const sdPresencaBuscaEl = panelEl.querySelector('.sdPresencaBusca');
+  if(sdPresencaBuscaEl) sdPresencaBuscaEl.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter'){ e.preventDefault(); registrarPresencaComValor(gameId, sdPresencaBuscaEl.value, null); sdPresencaBuscaEl.value=''; }
+  });
+  const sdPresencaScanBtnEl = panelEl.querySelector('.sdPresencaScanBtn');
+  if(sdPresencaScanBtnEl) sdPresencaScanBtnEl.addEventListener('click', ()=>{
+    openQrScanModal(texto => registrarPresencaComValor(gameId, texto, null));
+  });
   if(sdScoreAEl) sdScoreAEl.addEventListener('input', ()=>{ refrescarGame(); game.scoreA = sdScoreAEl.value===''?null:Number(sdScoreAEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
   if(sdScoreBEl) sdScoreBEl.addEventListener('input', ()=>{ refrescarGame(); game.scoreB = sdScoreBEl.value===''?null:Number(sdScoreBEl.value); markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); renderGameSummaryRow(gameId); });
   if(sdWoEl) sdWoEl.addEventListener('change', ()=>{ refrescarGame(); game.wo = sdWoEl.value || null; if(game.wo){ game.scoreA=null; game.scoreB=null; } markDirty(); syncMarcarSujoGame(gameId); renderScoreboard(); rerender(); });
