@@ -2724,7 +2724,15 @@ function syncAplicarLinha(linha){
   if(tabela==='inscrito_foto'){
     if(syncTemEdicaoLocalPendente('inscrito_foto', registro_id)) return;
     const a = STATE.inscritos.find(x=> String(x.id)===String(registro_id));
-    if(a){ a.foto = deletado ? '' : (dados||''); if(a.foto) syncImagensPendentesDePull.push(syncBaixarImagemSeNecessario(a.foto)); }
+    // Só grava a REFERÊNCIA aqui -- não busca a imagem em si (esse era o verdadeiro
+    // gargalo da abertura lenta: com centenas de inscritos, syncPuxarNovidades() ficava
+    // baixando centenas de fotos, uma por uma linha de "inscrito_foto", ANTES de voltar
+    // -- e syncCiclo()/init() esperam syncPuxarNovidades() terminar antes de mostrar
+    // qualquer tela). O download de verdade acontece depois, em segundo plano, via
+    // hydrateImageCacheInscritos() (chamada em syncCiclo(), logo abaixo) -- ela relê
+    // STATE.inscritos (já com essa referência aplicada) e busca só o que ainda não
+    // estiver em IMG_CACHE, sem travar a sincronização nem a tela.
+    if(a) a.foto = deletado ? '' : (dados||'');
     return;
   }
   if(tabela==='imagensPendentesUpload'){
@@ -3119,6 +3127,11 @@ async function syncCiclo(){
       syncLastSuccessAt = new Date();
       syncLastErrorMsg = '';
       if(aplicadas>0){ saveState(); renderAll(); }
+      // Fotos dos inscritos, em segundo plano -- não entra no "await" acima, pra puxada
+      // inicial não ficar presa esperando centenas de downloads (ver comentário em
+      // syncAplicarLinha, caso 'inscrito_foto'). Se alguma chegar, manda renderAll() de
+      // novo pra ela aparecer.
+      hydrateImageCacheInscritos().then(qtd=>{ if(qtd>0) renderAll(); }).catch(()=>{});
     } else {
       syncDetectarMudancasEAgendar();
       const enviadas = await syncEnviarPendentes();
@@ -3130,6 +3143,9 @@ async function syncCiclo(){
       syncLastErrorMsg = '';
       if(aplicadas>0){ if(isAdmin) markDirty(); saveState(); renderAll(); }
       else if(enviadas>0){ saveState(); }
+      // Mesma lógica do primeiro ciclo: busca fotos novas de inscrito (de outro
+      // dispositivo, por exemplo) em segundo plano, sem travar este ciclo periódico.
+      if(aplicadas>0) hydrateImageCacheInscritos().then(qtd=>{ if(qtd>0) renderAll(); }).catch(()=>{});
     }
   }catch(e){
     syncStatus = 'erro';
@@ -3189,20 +3205,57 @@ function imgSet(ref, dataUrl){
 
 /* Lista todas as referências de imagem atualmente usadas em STATE (cabeçalho, logos
    do crachá e foto de cada inscrito). */
-function collectImageRefs(){
+/* Logos do cabeçalho e do crachá -- poucas imagens, aparecem na própria tela inicial
+   (cabeçalho), então valem a pena esperar antes do primeiro renderAll(). Separado das
+   fotos de inscritos (collectImageRefsInscritos, abaixo) de propósito: ver
+   hydrateImageCache()/hydrateImageCacheInscritos() pro motivo -- baixar a foto de
+   CADA inscrito cadastrado antes de mostrar qualquer tela deixava o carregamento
+   inicial muito lento conforme o número de inscritos cresce (centenas de downloads
+   simultâneos, numa sincronização que a maioria das visitas -- o Painel público --
+   nem chega a precisar, já que foto de inscrito só aparece em telas de administração). */
+function collectImageRefsCriticas(){
   const refs = [];
   if(STATE.header && STATE.header.logoDataUrl) refs.push(STATE.header.logoDataUrl);
   if(STATE.header && STATE.header.bgDataUrl) refs.push(STATE.header.bgDataUrl);
   if(STATE.crachaLogos && STATE.crachaLogos.logo1) refs.push(STATE.crachaLogos.logo1);
   if(STATE.crachaLogos && STATE.crachaLogos.logo2) refs.push(STATE.crachaLogos.logo2);
+  return refs;
+}
+/* Foto de cada inscrito -- pode ser centenas de referências; buscada à parte, depois da
+   primeira tela já estar na tela (ver init()), nunca antes dela. */
+function collectImageRefsInscritos(){
+  const refs = [];
   (STATE.inscritos||[]).forEach(a=>{ if(a.foto) refs.push(a.foto); });
   return refs;
 }
+/* Mantido pelo nome antigo só para quem ainda chamar (ex.: um teste já escrito) --
+   continua fazendo os dois juntos, igual ao comportamento de antes desta mudança. */
+function collectImageRefs(){
+  return [...collectImageRefsCriticas(), ...collectImageRefsInscritos()];
+}
 
-/* Busca no Supabase Storage, para o cache em memória, todas as imagens referenciadas em
-   STATE que ainda não foram baixadas nesta sessão. É chamada uma única vez, na
-   inicialização do app (depois da primeira sincronização, que já populou STATE com os
-   dados vindos da nuvem — ver init()), para que as fotos apareçam já na primeira tela. */
+/* Busca no Supabase Storage, para o cache em memória, as imagens do cabeçalho/crachá
+   (logos, fundo) que ainda não foram baixadas nesta sessão. Chamada ANTES do primeiro
+   renderAll() (ver init()), porque aparecem na própria tela inicial -- são poucas, então
+   não atrasam o carregamento de forma perceptível. */
+async function hydrateImageCacheCriticas(){
+  const refs = collectImageRefsCriticas();
+  await Promise.all(refs.map(ref=> syncBaixarImagemSeNecessario(ref)));
+}
+/* Busca a foto de cada inscrito cadastrado -- pode ser centenas de requisições.
+   Chamada DEPOIS do primeiro renderAll() (ver init()), em segundo plano, sem travar a
+   abertura do app: a maioria das visitas (Painel público) nunca usa foto de inscrito, e
+   quem usa (telas de administração) só precisa dela quando de fato abrir essa tela.
+   Devolve a quantidade de fotos realmente baixadas, pra quem chamar decidir se vale a
+   pena atualizar a tela (ver uso em init()). */
+async function hydrateImageCacheInscritos(){
+  const refs = collectImageRefsInscritos().filter(ref=> !imgGet(ref));
+  await Promise.all(refs.map(ref=> syncBaixarImagemSeNecessario(ref)));
+  return refs.length;
+}
+/* Mantido pelo nome antigo (compatibilidade com quem já chamava assim) -- faz os dois
+   grupos, igual ao comportamento de antes desta mudança; init() não usa mais esta
+   função diretamente, ver hydrateImageCacheCriticas()/hydrateImageCacheInscritos(). */
 async function hydrateImageCache(){
   const refs = collectImageRefs();
   await Promise.all(refs.map(ref=> syncBaixarImagemSeNecessario(ref)));
@@ -11049,12 +11102,14 @@ function mostrarErroCarregamentoInicial(){
   // não terminou.
   restaurarImagensPendentesEnvio();
   syncRetentarImagensPendentes(); // tenta reenviar já, sem esperar até 20s pelo próximo ciclo automático
-  // Busca no Supabase Storage, para o cache em memória, as fotos/logos já referenciadas
-  // em STATE (agora populado pela sincronização acima) e migra automaticamente eventuais
-  // imagens antigas que ainda estejam salvas "cruas" (base64) dentro de STATE — backups
-  // importados de fora. Feito antes do primeiro renderAll(), para as imagens já
-  // aparecerem corretamente na primeira tela.
-  await hydrateImageCache();
+  // Busca no Supabase Storage, para o cache em memória, só os logos/fundo (poucas
+  // imagens, aparecem no próprio cabeçalho) — feito antes do primeiro renderAll(), pra
+  // essas aparecerem certo já na primeira tela. A foto de cada inscrito (que pode ser
+  // centenas) é buscada à parte, em segundo plano, depois da tela já estar de pé — ver
+  // o `.then(...)` logo abaixo do renderAll(), no fim deste init(). Migra também
+  // automaticamente eventuais imagens antigas que ainda estejam salvas "cruas" (base64)
+  // dentro de STATE — backups importados de fora.
+  await hydrateImageCacheCriticas();
   if(migrateInlineImagesToCloud()) await saveState();
   if(await migrarCodigosAcessoLegados()) await saveState();
   await finalizarSenhaAdminSeNecessario();
@@ -11270,6 +11325,14 @@ function mostrarErroCarregamentoInicial(){
   document.getElementById('editalViewModal').addEventListener('click', (e)=>{ if(e.target.id==='editalViewModal') closeEditalViewModal(); });
   window.addEventListener('beforeunload', (e)=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
   renderAll();
+  // Fotos de inscritos, em segundo plano, sem travar a abertura do app (ver
+  // hydrateImageCacheInscritos()) -- quando terminar, se alguma foto nova de fato
+  // chegou, manda renderAll() de novo pra ela aparecer (telas de administração que já
+  // estiverem abertas, como a lista de Inscritos ou o gerador de Crachá); se não havia
+  // nenhuma foto pendente (ex.: ninguém com foto cadastrada ainda), não refaz a tela à
+  // toa. Mesma função renderAll() já usada em todo o resto do app depois de qualquer
+  // mudança de STATE -- não é um caminho novo, só mais uma chamada a ela.
+  hydrateImageCacheInscritos().then(qtd=>{ if(qtd>0) renderAll(); }).catch(()=>{});
 })();
 </script>
 <script>
